@@ -201,25 +201,23 @@ async function main() {
   }
 
   // 3) Segmentos ao minuto 30.
-  console.log("\n[Segmentos :30]");
+  // O AGENDAMENTO é feito no Liquidsoap custom (liquidsoap/segments_mix.liq),
+  // com ducking real: a música continua a 50% por baixo e o segmento +30%.
+  // Por isso as playlists ficam DESATIVADAS no AzuraCast — só precisamos que
+  // os clips estejam na media. (Se estivessem ativas, tocavam a dobrar.)
+  console.log("\n[Segmentos :30 — geridos por Liquidsoap, playlists desativadas]");
   for (const seg of SEGMENTS) {
     const rel = `segmentos/${seg.file}`;
     const abs = join(AUDIO, "segmentos", seg.file);
     if (!existsSync(abs)) { console.log(`  ! falta ${abs}, ignorado`); continue; }
     await uploadIfNeeded(sid, paths, rel, abs);
-    const pid = await ensurePlaylist(sid, playlists, {
-      name: seg.name,
-      type: "once_per_hour",
-      source: "songs",
-      order: "sequential",
-      play_per_hour_minute: 30,
-      backend_options: ["interrupt", "single_track"],
-      is_enabled: true,
-      schedule_items: seg.hours.map((h) => ({
-        start_time: h * 100, end_time: h * 100 + 59, start_date: null, end_date: null, days: [], loop_once: false,
-      })),
-    });
-    await assign(sid, pid, rel, "segmentos");
+    if (playlists.has(seg.name)) {
+      // já existe (ex.: de um provisionamento antigo) — garante que está OFF.
+      await api("PUT", `/station/${sid}/playlist/${playlists.get(seg.name)}`, { is_enabled: false });
+      console.log(`  = playlist "${seg.name}" desativada (agendada no Liquidsoap)`);
+    } else {
+      console.log(`  = "${seg.name}" não criada no AzuraCast (agendada no Liquidsoap)`);
+    }
   }
 
   // 3b) Jingles a cada X minutos.
@@ -241,9 +239,9 @@ async function main() {
     await assign(sid, pid, rel, "jingles");
   }
 
-  // 3c) Bed "Breaking News" por baixo dos segmentos (Liquidsoap custom).
-  console.log("\n[Bed Liquidsoap]");
-  const liqPath = join(__dir, "liquidsoap", "news_bed.liq");
+  // 3c) Segmentos com ducking real + bed (Liquidsoap custom_config).
+  console.log("\n[Ducking Liquidsoap]");
+  const liqPath = join(__dir, "liquidsoap", "segments_mix.liq");
   if (existsSync(liqPath)) {
     const admin = await api("GET", `/admin/station/${sid}`);
     const shortName = admin.short_name || SHORTCODE;
@@ -254,7 +252,7 @@ async function main() {
     await api("PUT", `/admin/station/${sid}`, { backend_config: bc });
     console.log(`  custom_config aplicado (media dir: ${mediaDir})`);
   } else {
-    console.log("  (news_bed.liq não encontrado, ignorado)");
+    console.log("  (segments_mix.liq não encontrado, ignorado)");
   }
 
   // 4) Aplicar no backend.
