@@ -1,4 +1,7 @@
-import LivePlayer from "./live-player";
+import PlayButton from "./play-button";
+import PlayerBar from "./player-bar";
+import ProgramaAtualCard from "./programa-atual";
+import { PlayerProvider } from "./player-context";
 
 const STREAM_URL =
   process.env.NEXT_PUBLIC_STREAM_URL ??
@@ -34,29 +37,37 @@ function Equalizer() {
 
 export default function Home() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-6 py-20 text-center">
-      <span className="mb-10 inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-4 py-1.5 text-xs font-medium backdrop-blur-sm">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+    <PlayerProvider streamUrl={STREAM_URL}>
+      <main className="flex flex-1 flex-col items-center justify-center px-6 py-20 pb-32 text-center">
+        <span className="mb-10 inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-4 py-1.5 text-xs font-medium backdrop-blur-sm">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+          </span>
+          EM DIRETO
         </span>
-        EM DIRETO
-      </span>
 
-      <Logo />
+        <Logo />
 
-      <p className="mt-8 max-w-xl text-lg text-muted sm:text-xl">
-        Música sem parar, ao vivo, onde estiveres. Carrega em play e deixa a
-        Radio IT tocar.
-      </p>
+        <p className="mt-8 max-w-xl text-lg text-muted sm:text-xl">
+          Música sem parar, ao vivo, onde estiveres. Carrega em play e deixa a
+          Radio IT tocar.
+        </p>
 
-      <div className="mt-10 flex flex-col items-center gap-5 sm:flex-row">
-        <LivePlayer streamUrl={STREAM_URL} />
-        <div className="flex items-center gap-3 rounded-full border border-white/30 bg-white/10 px-5 py-3 backdrop-blur-sm">
-          <Equalizer />
-          <span className="text-sm font-medium">Agora a tocar</span>
+        <div className="mt-10">
+          <ProgramaAtualCard />
         </div>
-      </div>
-    </main>
+
+        <div className="mt-8 flex flex-col items-center gap-5 sm:flex-row">
+          <PlayButton />
+          <div className="flex items-center gap-3 rounded-full border border-white/30 bg-white/10 px-5 py-3 backdrop-blur-sm">
+            <Equalizer />
+            <span className="text-sm font-medium">Agora a tocar</span>
+          </div>
+        </div>
+      </main>
+
+      <PlayerBar />
+    </PlayerProvider>
   );
 }
