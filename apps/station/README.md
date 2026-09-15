@@ -30,6 +30,15 @@ Provisionada por `provision.mjs`, misturada com a rotação geral de música:
   - **Tech ao Minuto** → 10, 12, 16, 19, 21, 23
 - **Jingles** — `once_per_x_minutes`, `interrupt + single_track`:
   - **Jingle 1** → a cada 3 min (`audio/jingles/jingle_1.mp3`)
+- **Bed "Breaking News"** (`audio/beds/news_bed.mp3`) — mistura de áudio ao vivo
+  em Liquidsoap custom ([`liquidsoap/news_bed.liq`](liquidsoap/news_bed.liq)),
+  aplicada pelo `provision.mjs` no `custom_config` da estação. Entra desde o
+  início por baixo do segmento e faz fade de ~1s no fim:
+  - **Tech ao Minuto** → 30%
+  - **Trânsito / Meteo** → 20%
+
+  > A deteção é por metadados (`filename` contém `segmentos/...`). Para afinar
+  > volumes/segmentos, edita `news_bed.liq` e corre `npm run station:provision`.
 
 Para mudar a grelha, edita as constantes `HOUR_FILES` e `SEGMENTS` no topo de
 [`provision.mjs`](provision.mjs) e corre `npm run station:provision` outra vez.

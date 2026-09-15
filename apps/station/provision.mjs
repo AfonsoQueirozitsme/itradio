@@ -241,6 +241,22 @@ async function main() {
     await assign(sid, pid, rel, "jingles");
   }
 
+  // 3c) Bed "Breaking News" por baixo dos segmentos (Liquidsoap custom).
+  console.log("\n[Bed Liquidsoap]");
+  const liqPath = join(__dir, "liquidsoap", "news_bed.liq");
+  if (existsSync(liqPath)) {
+    const admin = await api("GET", `/admin/station/${sid}`);
+    const shortName = admin.short_name || SHORTCODE;
+    const mediaDir = `/var/azuracast/stations/${shortName}/media`;
+    const snippet = (await readFile(liqPath, "utf8")).replaceAll("{{MEDIA_DIR}}", mediaDir);
+    const bc = admin.backend_config || {};
+    bc.custom_config = snippet;
+    await api("PUT", `/admin/station/${sid}`, { backend_config: bc });
+    console.log(`  custom_config aplicado (media dir: ${mediaDir})`);
+  } else {
+    console.log("  (news_bed.liq não encontrado, ignorado)");
+  }
+
   // 4) Aplicar no backend.
   console.log("\n• A reiniciar a estação para aplicar…");
   await api("POST", `/station/${sid}/restart`);
