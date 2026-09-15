@@ -8,9 +8,11 @@ import type { ProgramaAtual } from "./programacao";
 
 export default function PlayerExpanded({
   prog,
+  closing = false,
   onClose,
 }: {
   prog: ProgramaAtual | null;
+  closing?: boolean;
   onClose: () => void;
 }) {
   const { playing, loading, error, now, historico, toggle } = usePlayer();
@@ -19,11 +21,9 @@ export default function PlayerExpanded({
   const titulo = error
     ? "Stream indisponível"
     : now.texto ?? (loading ? "A ligar…" : "Radio IT — em direto");
-  const subtitulo = now.aoVivo
-    ? "Em direto"
-    : prog
-      ? `${prog.programa} · com ${prog.locutor.nome}`
-      : "Piloto automático";
+  // Cabeçalho do programa (ao lado da capa).
+  const programaTitulo = prog?.programa ?? (now.aoVivo ? "Em direto" : "Piloto automático");
+  const locutorLinha = prog ? `com ${prog.locutor.nome}` : "Só música, sem parar";
 
   // Capa: sempre a foto do programa que está online (não o ícone default da faixa).
   const capa = prog?.locutor.foto ?? null;
@@ -44,49 +44,64 @@ export default function PlayerExpanded({
   }
 
   return (
-    <div className="app-gradient animate-expand fixed inset-0 z-50 flex flex-col overflow-y-auto">
+    <div
+      className={`app-gradient fixed inset-0 z-50 flex flex-col overflow-y-auto ${
+        closing ? "animate-collapse" : "animate-expand"
+      }`}
+    >
       {/* Logótipo no canto superior esquerdo */}
       <div className="pointer-events-none sticky top-0 z-10 px-6 pt-6">
         <Logo className="[&_span:first-child]:text-3xl [&_span:last-child]:px-3 [&_span:last-child]:text-2xl sm:[&_span:first-child]:text-4xl sm:[&_span:last-child]:text-3xl" />
       </div>
 
       {/* Hero */}
-      <div className="-mt-4 flex flex-1 flex-col items-center px-6 pb-40 text-center">
-        <div className="relative h-56 w-56 overflow-hidden rounded-3xl shadow-2xl ring-1 ring-white/20 sm:h-64 sm:w-64">
-          {capa ? (
-            <Image src={capa} alt="" fill sizes="256px" className="object-cover" unoptimized />
-          ) : (
-            <span className="flex h-full w-full items-center justify-center bg-white/15 text-6xl">
-              🎧
-            </span>
-          )}
-        </div>
+      <div className="flex flex-1 flex-col items-center px-6 pb-40">
+        {/* Cabeçalho: capa + título do programa ao lado */}
+        <div className="flex w-full max-w-3xl flex-col items-center gap-6 pt-6 text-center sm:flex-row sm:items-center sm:gap-8 sm:text-left">
+          <div className="relative h-48 w-48 shrink-0 overflow-hidden rounded-3xl shadow-2xl ring-1 ring-white/20 sm:h-56 sm:w-56">
+            {capa ? (
+              <Image src={capa} alt="" fill sizes="224px" className="object-cover" unoptimized />
+            ) : (
+              <span className="flex h-full w-full items-center justify-center bg-white/15 text-6xl">
+                🎧
+              </span>
+            )}
+          </div>
 
-        <p className="mt-8 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-white/80">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-          </span>
-          {subtitulo}
-        </p>
-        <h2 className="mt-3 max-w-xl text-2xl font-semibold leading-tight text-white sm:text-3xl">
-          {titulo}
-        </h2>
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center justify-center gap-2 text-xs font-medium uppercase tracking-wide text-white/80 sm:justify-start">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+              </span>
+              No ar agora
+            </p>
+            <h2 className="mt-2 text-3xl font-semibold leading-tight text-white sm:text-4xl">
+              {programaTitulo}
+            </h2>
+            <p className="mt-1 text-base text-white/80">{locutorLinha}</p>
 
-        {/* Ações */}
-        <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-          <button
-            type="button"
-            onClick={partilhar}
-            className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-brand shadow-lg transition-transform hover:scale-105"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-              <polyline points="16 6 12 2 8 6" />
-              <line x1="12" y1="2" x2="12" y2="15" />
-            </svg>
-            {copiado ? "Link copiado!" : "Partilhar"}
-          </button>
+            <p className="mt-4 truncate text-sm text-white/70">
+              <span className="text-white/50">A tocar: </span>
+              {titulo}
+            </p>
+
+            {/* Ações */}
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3 sm:justify-start">
+              <button
+                type="button"
+                onClick={partilhar}
+                className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-brand shadow-lg transition-transform hover:scale-105"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                  <polyline points="16 6 12 2 8 6" />
+                  <line x1="12" y1="2" x2="12" y2="15" />
+                </svg>
+                {copiado ? "Link copiado!" : "Partilhar"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Passou na RadioIT */}
@@ -124,8 +139,8 @@ export default function PlayerExpanded({
         </div>
       </div>
 
-      {/* Dock inferior */}
-      <div className="fixed inset-x-0 bottom-0 border-t border-white/15 bg-brand/70 backdrop-blur-md">
+      {/* Dock inferior (fixo ao fundo, opaco) */}
+      <div className="fixed inset-x-0 bottom-0 z-10 border-t border-white/15 bg-brand shadow-2xl">
         <div className="mx-auto flex max-w-3xl items-center gap-4 px-4 py-3">
           <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg">
             {capa ? (

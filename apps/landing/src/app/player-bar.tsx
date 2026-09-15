@@ -10,6 +10,15 @@ export default function PlayerBar() {
   const { playing, loading, error, started, now, toggle } = usePlayer();
   const [prog, setProg] = useState<ProgramaAtual | null>(null);
   const [aberto, setAberto] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  function fechar() {
+    setClosing(true);
+    setTimeout(() => {
+      setAberto(false);
+      setClosing(false);
+    }, 360); // igual à duração de .animate-collapse
+  }
 
   useEffect(() => {
     const update = () => setProg(programaAtual());
@@ -26,7 +35,7 @@ export default function PlayerBar() {
     : now.texto ?? (loading ? "A ligar…" : "Radio IT — em direto");
 
   // Expandido: tela cheia (o dock traz o próprio botão Fechar).
-  if (aberto) return <PlayerExpanded prog={prog} onClose={() => setAberto(false)} />;
+  if (aberto) return <PlayerExpanded prog={prog} closing={closing} onClose={fechar} />;
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 px-3 pb-3">
