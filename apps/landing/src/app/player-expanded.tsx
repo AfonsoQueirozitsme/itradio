@@ -17,6 +17,7 @@ export default function PlayerExpanded({
 }) {
   const { playing, loading, error, now, historico, toggle } = usePlayer();
   const [copiado, setCopiado] = useState(false);
+  // (dock fixo ao fundo do overlay; scroll só na área de conteúdo)
 
   const titulo = error
     ? "Stream indisponível"
@@ -45,17 +46,19 @@ export default function PlayerExpanded({
 
   return (
     <div
-      className={`app-gradient fixed inset-0 z-50 flex flex-col overflow-y-auto ${
+      className={`app-gradient fixed inset-0 z-50 ${
         closing ? "animate-collapse" : "animate-expand"
       }`}
     >
+      {/* Área com scroll (dock fica fora, sempre no fundo) */}
+      <div className="absolute inset-0 overflow-y-auto">
       {/* Logótipo no canto superior esquerdo */}
       <div className="pointer-events-none sticky top-0 z-10 px-6 pt-6">
         <Logo className="[&_span:first-child]:text-3xl [&_span:last-child]:px-3 [&_span:last-child]:text-2xl sm:[&_span:first-child]:text-4xl sm:[&_span:last-child]:text-3xl" />
       </div>
 
       {/* Hero */}
-      <div className="flex flex-1 flex-col items-center px-6 pb-40">
+      <div className="flex min-h-full flex-col items-center px-6 pb-40">
         {/* Cabeçalho: capa + título do programa ao lado */}
         <div className="flex w-full max-w-3xl flex-col items-center gap-6 pt-6 text-center sm:flex-row sm:items-center sm:gap-8 sm:text-left">
           <div className="relative h-48 w-48 shrink-0 overflow-hidden rounded-3xl shadow-2xl ring-1 ring-white/20 sm:h-56 sm:w-56">
@@ -138,9 +141,10 @@ export default function PlayerExpanded({
           )}
         </div>
       </div>
+      </div>
 
-      {/* Dock inferior (fixo ao fundo, opaco) */}
-      <div className="fixed inset-x-0 bottom-0 z-10 border-t border-white/15 bg-brand shadow-2xl">
+      {/* Dock inferior (colado ao fundo do overlay, opaco) */}
+      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/15 bg-brand shadow-2xl">
         <div className="mx-auto flex max-w-3xl items-center gap-4 px-4 py-3">
           <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg">
             {capa ? (
