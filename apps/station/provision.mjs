@@ -22,6 +22,12 @@
  *   npm run station:provision
  *
  * Variáveis opcionais: STATION_NAME (def. "IT.FM"), STATION_SHORTCODE (def. "it.fm").
+ *
+ * Utilizadores super-admin (opcional): se ADMIN_PASSWORD estiver definida, o
+ * script garante que cada email em ADMIN_USERS (lista separada por vírgulas;
+ * def. os dois emails da equipa) existe como Super Administrator. A password
+ * NUNCA está no código — vem só do ambiente (guarda-a num .env gitignored):
+ *   ADMIN_PASSWORD='...' npm run station:provision
  */
 
 import { readFile, readdir } from "node:fs/promises";
@@ -51,6 +57,12 @@ const HOUR_FILES = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23]
 const JINGLES = [
   { file: "jingle_1.mp3", name: "Jingle 1", everyMinutes: 3 },
 ];
+
+// Utilizadores super-admin criados por omissão (só se ADMIN_PASSWORD existir).
+const ADMIN_USERS = (process.env.ADMIN_USERS ||
+  "afonso.queiroz@bauermedia.pt,carlos.picarra@bauermedia.pt")
+  .split(",").map((e) => e.trim()).filter(Boolean);
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD; // nunca no repo
 
 // Segmentos ao minuto 30. Cada um toca nas horas indicadas.
 const SEGMENTS = [
@@ -151,9 +163,39 @@ async function assign(sid, playlistId, relPath, dir) {
   });
 }
 
+async function ensureUsers() {
+  if (!ADMIN_PASSWORD) {
+    console.log("\n[Utilizadores] ADMIN_PASSWORD não definida — passo ignorado.");
+    return;
+  }
+  console.log("\n[Utilizadores super-admin]");
+  // Encontra o role de super-admin.
+  const roles = await api("GET", "/admin/roles");
+  const superRole = (Array.isArray(roles) ? roles : []).find((r) => r.is_super_admin);
+  if (!superRole) { console.log("  ! não encontrei um role super-admin, ignorado"); return; }
+
+  const users = await api("GET", "/admin/users");
+  const byEmail = new Map(
+    (Array.isArray(users) ? users : []).map((u) => [String(u.email).toLowerCase(), u]),
+  );
+  for (const email of ADMIN_USERS) {
+    if (byEmail.has(email.toLowerCase())) {
+      console.log(`  = "${email}" já existe (não mexo na password)`);
+      continue;
+    }
+    const created = await api("POST", "/admin/users", {
+      email,
+      new_password: ADMIN_PASSWORD,
+      roles: [{ id: superRole.id }],
+    });
+    console.log(`  + "${email}" criado como Super Administrator (id ${created.id})`);
+  }
+}
+
 async function main() {
   console.log(`AzuraCast: ${BASE}`);
   const sid = await resolveStationId();
+  await ensureUsers();
   const playlists = await existingPlaylists(sid);
   const paths = await existingPaths(sid);
 
