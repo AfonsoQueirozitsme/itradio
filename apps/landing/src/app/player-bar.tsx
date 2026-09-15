@@ -29,10 +29,10 @@ export default function PlayerBar() {
   if (aberto) return <PlayerExpanded prog={prog} onClose={() => setAberto(false)} />;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50">
-      <div className="mx-auto max-w-3xl sm:mb-4">
-        {/* Barra do player */}
-        <div className="animate-slide-up mx-2 flex items-center gap-4 border border-white/20 bg-brand/80 px-4 py-3 shadow-2xl backdrop-blur-md sm:mx-0 sm:rounded-2xl">
+    <div className="fixed inset-x-0 bottom-0 z-50 px-3 pb-3">
+      <div className="mx-auto max-w-3xl">
+        {/* Barra do player (flutuante) */}
+        <div className="animate-slide-up flex items-center gap-4 rounded-2xl border border-white/20 bg-brand/80 px-4 py-3 shadow-2xl backdrop-blur-md">
           {/* Locutor / programa */}
           {prog ? (
             <Image

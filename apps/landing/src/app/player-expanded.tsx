@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import Logo from "./logo";
 import { usePlayer } from "./player-context";
 import type { ProgramaAtual } from "./programacao";
 
@@ -24,8 +25,8 @@ export default function PlayerExpanded({
       ? `${prog.programa} · com ${prog.locutor.nome}`
       : "Piloto automático";
 
-  // Capa grande: arte da faixa → foto do locutor → placeholder.
-  const capa = now.arte ?? prog?.locutor.foto ?? null;
+  // Capa: sempre a foto do programa que está online (não o ícone default da faixa).
+  const capa = prog?.locutor.foto ?? null;
 
   async function partilhar() {
     const url = typeof window !== "undefined" ? window.location.href : "";
@@ -44,8 +45,13 @@ export default function PlayerExpanded({
 
   return (
     <div className="app-gradient animate-expand fixed inset-0 z-50 flex flex-col overflow-y-auto">
+      {/* Logótipo no canto superior esquerdo */}
+      <div className="pointer-events-none sticky top-0 z-10 px-6 pt-6">
+        <Logo className="[&_span:first-child]:text-3xl [&_span:last-child]:px-3 [&_span:last-child]:text-2xl sm:[&_span:first-child]:text-4xl sm:[&_span:last-child]:text-3xl" />
+      </div>
+
       {/* Hero */}
-      <div className="flex flex-1 flex-col items-center px-6 pt-14 pb-40 text-center">
+      <div className="-mt-4 flex flex-1 flex-col items-center px-6 pb-40 text-center">
         <div className="relative h-56 w-56 overflow-hidden rounded-3xl shadow-2xl ring-1 ring-white/20 sm:h-64 sm:w-64">
           {capa ? (
             <Image src={capa} alt="" fill sizes="256px" className="object-cover" unoptimized />
