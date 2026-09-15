@@ -28,6 +28,8 @@ Provisionada por `provision.mjs`, misturada com a rotação geral de música:
   - **Trânsito** → 07, 09, 14, 17
   - **Meteo** → 08, 11, 13, 15, 18, 20, 22
   - **Tech ao Minuto** → 10, 12, 16, 19, 21, 23
+- **Jingles** — `once_per_x_minutes`, `interrupt + single_track`:
+  - **Jingle 1** → a cada 3 min (`audio/jingles/jingle_1.mp3`)
 
 Para mudar a grelha, edita as constantes `HOUR_FILES` e `SEGMENTS` no topo de
 [`provision.mjs`](provision.mjs) e corre `npm run station:provision` outra vez.

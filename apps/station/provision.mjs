@@ -47,6 +47,11 @@ if (!KEY) {
 // Anúncios de topo de hora: o ficheiro N.mp3 toca ao minuto 0 da hora N.
 const HOUR_FILES = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23];
 
+// Jingles a cada X minutos (independente da hora).
+const JINGLES = [
+  { file: "jingle_1.mp3", name: "Jingle 1", everyMinutes: 3 },
+];
+
 // Segmentos ao minuto 30. Cada um toca nas horas indicadas.
 const SEGMENTS = [
   { file: "transito.mp3",       name: "Trânsito",       hours: [7, 9, 14, 17] },
@@ -215,6 +220,25 @@ async function main() {
       })),
     });
     await assign(sid, pid, rel, "segmentos");
+  }
+
+  // 3b) Jingles a cada X minutos.
+  console.log("\n[Jingles]");
+  for (const j of JINGLES) {
+    const rel = `jingles/${j.file}`;
+    const abs = join(AUDIO, "jingles", j.file);
+    if (!existsSync(abs)) { console.log(`  ! falta ${abs}, ignorado`); continue; }
+    await uploadIfNeeded(sid, paths, rel, abs);
+    const pid = await ensurePlaylist(sid, playlists, {
+      name: j.name,
+      type: "once_per_x_minutes",
+      source: "songs",
+      order: "sequential",
+      play_per_minutes: j.everyMinutes,
+      backend_options: ["interrupt", "single_track"],
+      is_enabled: true,
+    });
+    await assign(sid, pid, rel, "jingles");
   }
 
   // 4) Aplicar no backend.
