@@ -1,0 +1,24 @@
+# Túnel Cloudflare para expor o AzuraCast num domínio, sem abrir portas no router.
+#
+# Como usar:
+#   1. Em Cloudflare Zero Trust → Networks → Tunnels, cria um túnel e copia o token.
+#   2. Põe CLOUDFLARE_TUNNEL_TOKEN=... no apps/station/.env
+#   3. No dashboard do túnel, adiciona um "Public hostname":
+#        - Subdomain/domain: ex. radio.oteudominio.pt
+#        - Service:          HTTP  →  localhost:8080
+#      (8080 = AZURACAST_HTTP_PORT; o AzuraCast serve painel E stream /listen/ nessa porta)
+#   4. `npm run station:tunnel`
+#
+# O painel fica em https://radio.oteudominio.pt e o stream em
+#   https://radio.oteudominio.pt/listen/it.fm/radio.mp3
+#
+# Nota: depois de o domínio funcionar, define no AzuraCast (Administração →
+# Definições → Base URL) o URL público e ativa "Prefer Secure URLs (HTTPS)".
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    network_mode: host

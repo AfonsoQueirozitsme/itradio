@@ -1,0 +1,24 @@
+{
+  "name": "it-radio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monorepo da IT Rádio — landing itFM (Next.js) + sistema de emissão (AzuraCast)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @it-radio/landing",
+    "build": "npm run build --workspace @it-radio/landing",
+    "start": "npm run start --workspace @it-radio/landing",
+    "lint": "npm run lint --workspace @it-radio/landing",
+    "station:up": "bash apps/station/dc.sh up -d",
+    "station:down": "bash apps/station/dc.sh down",
+    "station:logs": "bash apps/station/dc.sh logs -f web",
+    "station:pull": "bash apps/station/dc.sh pull",
+    "station:backup": "bash apps/station/dc.sh exec -T web azuracast_cli azuracast:backup /var/azuracast/backups/manual.zip",
+    "station:provision": "node apps/station/provision.mjs",
+    "station:tunnel": "DC_FILE=cloudflared.yml bash apps/station/dc.sh up -d",
+    "station:tunnel:down": "DC_FILE=cloudflared.yml bash apps/station/dc.sh down"
+  }
+}

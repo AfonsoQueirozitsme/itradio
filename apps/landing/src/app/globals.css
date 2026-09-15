@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+:root {
+  /* Brand — Radio IT */
+  --brand: #ec5a57; /* vermelho coral do logótipo */
+  --brand-dark: #d94b48;
+
+  /* Gradiente do ícone: azul-claro → rosa → laranja */
+  --grad-blue: #cfe0f3;
+  --grad-pink: #ff5c8a;
+  --grad-orange: #ff8a3d;
+
+  --foreground: #ffffff;
+  --muted: rgba(255, 255, 255, 0.82);
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-geist-sans);
+  --font-logo: var(--font-logo);
+}
+
+body {
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: linear-gradient(
+    135deg,
+    var(--grad-pink) 0%,
+    var(--brand) 30%,
+    var(--grad-orange) 70%,
+    var(--grad-blue) 100%
+  );
+  background-attachment: fixed;
+}
+
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+.eq-bar {
+  transform-origin: bottom;
+  animation: eq 0.9s ease-in-out infinite;
+}
