@@ -18,12 +18,20 @@ type NowPlaying = {
   aoVivo: boolean;
 };
 
+/** Uma faixa que já passou. */
+export type Historico = {
+  id: string;
+  texto: string;
+  arte: string | null;
+};
+
 type PlayerState = {
   playing: boolean;
   loading: boolean;
   error: boolean;
   started: boolean;
   now: NowPlaying;
+  historico: Historico[];
   toggle: () => void;
 };
 
@@ -65,6 +73,7 @@ export function PlayerProvider({
   const [error, setError] = useState(false);
   const [started, setStarted] = useState(false);
   const [now, setNow] = useState<NowPlaying>({ texto: null, arte: null, aoVivo: false });
+  const [historico, setHistorico] = useState<Historico[]>([]);
 
   // Elemento de áudio (single source of truth).
   useEffect(() => {
@@ -109,6 +118,24 @@ export function PlayerProvider({
         const texto =
           (aoVivo && streamer ? streamer : (song.text as string)?.trim()) || null;
         setNow({ texto, arte: (song.art as string) || null, aoVivo });
+
+        const hist = Array.isArray(data?.song_history) ? data.song_history : [];
+        setHistorico(
+          hist
+            .map((h: Record<string, unknown>) => {
+              const s = (h?.song ?? {}) as Record<string, unknown>;
+              const t = (s.text as string)?.trim();
+              return t
+                ? {
+                    id: String(h?.sh_id ?? h?.played_at ?? t),
+                    texto: t,
+                    arte: (s.art as string) || null,
+                  }
+                : null;
+            })
+            .filter(Boolean)
+            .slice(0, 10) as Historico[],
+        );
       } catch {
         /* ignora falhas de rede pontuais */
       }
@@ -150,6 +177,7 @@ export function PlayerProvider({
     error,
     started,
     now,
+    historico,
     toggle,
   };
 
