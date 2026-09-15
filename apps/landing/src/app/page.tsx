@@ -20,21 +20,6 @@ function Logo() {
   );
 }
 
-function Equalizer() {
-  const bars = [0, 0.15, 0.3, 0.1, 0.25, 0.05, 0.2];
-  return (
-    <div className="flex h-6 items-end gap-1" aria-hidden>
-      {bars.map((delay, i) => (
-        <span
-          key={i}
-          className="eq-bar w-1.5 rounded-full bg-white"
-          style={{ height: "100%", animationDelay: `${delay}s` }}
-        />
-      ))}
-    </div>
-  );
-}
-
 export default function Home() {
   return (
     <PlayerProvider streamUrl={STREAM_URL}>
@@ -58,12 +43,8 @@ export default function Home() {
           <ProgramaAtualCard />
         </div>
 
-        <div className="mt-8 flex flex-col items-center gap-5 sm:flex-row">
+        <div className="mt-8">
           <PlayButton />
-          <div className="flex items-center gap-3 rounded-full border border-white/30 bg-white/10 px-5 py-3 backdrop-blur-sm">
-            <Equalizer />
-            <span className="text-sm font-medium">Agora a tocar</span>
-          </div>
         </div>
       </main>
 
