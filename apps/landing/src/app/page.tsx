@@ -24,14 +24,6 @@ export default function Home() {
   return (
     <PlayerProvider streamUrl={STREAM_URL}>
       <main className="flex flex-1 flex-col items-center justify-center px-6 py-20 pb-32 text-center">
-        <span className="mb-10 inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-4 py-1.5 text-xs font-medium backdrop-blur-sm">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-          </span>
-          EM DIRETO
-        </span>
-
         <Logo />
 
         <p className="mt-8 max-w-xl text-lg text-muted sm:text-xl">

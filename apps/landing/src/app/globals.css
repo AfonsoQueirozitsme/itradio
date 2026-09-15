@@ -63,3 +63,24 @@ body {
 .animate-panel-up {
   animation: panel-up 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+@keyframes expand-in {
+  from { transform: translateY(3%); opacity: 0; }
+  to   { transform: translateY(0);  opacity: 1; }
+}
+
+.animate-expand {
+  animation: expand-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Fundo da app (igual ao body) para o overlay expandido tapar o que está atrás. */
+.app-gradient {
+  background: linear-gradient(
+    135deg,
+    var(--grad-pink) 0%,
+    var(--brand) 30%,
+    var(--grad-orange) 70%,
+    var(--grad-blue) 100%
+  );
+  background-attachment: fixed;
+}

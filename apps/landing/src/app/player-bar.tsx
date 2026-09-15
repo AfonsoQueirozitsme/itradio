@@ -3,10 +3,11 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { usePlayer } from "./player-context";
+import PlayerExpanded from "./player-expanded";
 import { programaAtual, type ProgramaAtual } from "./programacao";
 
 export default function PlayerBar() {
-  const { playing, loading, error, started, now, historico, toggle } = usePlayer();
+  const { playing, loading, error, started, now, toggle } = usePlayer();
   const [prog, setProg] = useState<ProgramaAtual | null>(null);
   const [aberto, setAberto] = useState(false);
 
@@ -24,45 +25,12 @@ export default function PlayerBar() {
     ? "Stream indisponível"
     : now.texto ?? (loading ? "A ligar…" : "Radio IT — em direto");
 
+  // Expandido: tela cheia (o dock traz o próprio botão Fechar).
+  if (aberto) return <PlayerExpanded prog={prog} onClose={() => setAberto(false)} />;
+
   return (
     <div className="fixed inset-x-0 bottom-0 z-50">
       <div className="mx-auto max-w-3xl sm:mb-4">
-        {/* Painel "Passou na RadioIT" */}
-        {aberto && (
-          <div className="animate-panel-up mx-2 mb-2 overflow-hidden rounded-2xl border border-white/20 bg-brand/90 shadow-2xl backdrop-blur-md sm:mx-0">
-            <p className="border-b border-white/15 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-white/80">
-              Passou na RadioIT
-            </p>
-            {historico.length === 0 ? (
-              <p className="px-4 py-6 text-center text-sm text-white/70">
-                Ainda sem histórico…
-              </p>
-            ) : (
-              <ul className="max-h-72 divide-y divide-white/10 overflow-y-auto">
-                {historico.map((h) => (
-                  <li key={h.id} className="flex items-center gap-3 px-4 py-2.5">
-                    {h.arte ? (
-                      <Image
-                        src={h.arte}
-                        alt=""
-                        width={36}
-                        height={36}
-                        className="h-9 w-9 shrink-0 rounded-md object-cover"
-                        unoptimized
-                      />
-                    ) : (
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white/15 text-sm">
-                        ♪
-                      </span>
-                    )}
-                    <span className="truncate text-sm text-white">{h.texto}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
         {/* Barra do player */}
         <div className="animate-slide-up mx-2 flex items-center gap-4 border border-white/20 bg-brand/80 px-4 py-3 shadow-2xl backdrop-blur-md sm:mx-0 sm:rounded-2xl">
           {/* Locutor / programa */}
@@ -92,25 +60,14 @@ export default function PlayerBar() {
             <p className="truncate text-sm font-medium text-white">{radioText}</p>
           </div>
 
-          {/* Abrir "Passou na RadioIT" */}
+          {/* Expandir (tela cheia + "Passou na RadioIT") */}
           <button
             type="button"
-            onClick={() => setAberto((v) => !v)}
-            aria-expanded={aberto}
-            aria-label="Passou na RadioIT"
+            onClick={() => setAberto(true)}
+            aria-label="Expandir player"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/25"
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className={`transition-transform duration-300 ${aberto ? "rotate-180" : ""}`}
-            >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 15l-6-6-6 6" />
             </svg>
           </button>
