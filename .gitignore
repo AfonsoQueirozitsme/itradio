@@ -42,3 +42,6 @@ next-env.d.ts
 
 # testing / coverage
 coverage/
+
+# build local da programação (áudio, não versionar)
+apps/station/build/
