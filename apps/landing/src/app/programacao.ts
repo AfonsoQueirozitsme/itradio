@@ -29,14 +29,14 @@ export const LOCUTORES: Record<string, Locutor> = {
   tomas_rocha: { slug: "tomas_rocha", nome: "Tomás Rocha", foto: "/locutores/tomas_rocha.jpg" },
 };
 
-// Grelha por omissão (placeholder — ajusta aos turnos reais).
+// Grelha real da IT.FM (turnos = [início, fim) em hora local de Lisboa).
 export const GRELHA: Turno[] = [
-  { locutor: "beatriz_lima", programa: "Manhãs IT", inicio: 6, fim: 10 },
-  { locutor: "diogo_silva", programa: "Meio-Dia IT", inicio: 10, fim: 13 },
-  { locutor: "sofia_martins", programa: "Tarde IT", inicio: 13, fim: 16 },
-  { locutor: "goncalo_pires", programa: "Regresso a Casa", inicio: 16, fim: 20 },
-  { locutor: "tomas_rocha", programa: "Noites IT", inicio: 20, fim: 24 },
-  // 00–06: piloto automático (só música).
+  { locutor: "diogo_silva", programa: "Boot Matinal", inicio: 7, fim: 10 },
+  { locutor: "sofia_martins", programa: "Ctrl+Alt+Ritmo", inicio: 10, fim: 13 },
+  { locutor: "tomas_rocha", programa: "Pause & Play", inicio: 13, fim: 16 },
+  { locutor: "beatriz_lima", programa: "Hora de Ponta", inicio: 16, fim: 20 },
+  { locutor: "goncalo_pires", programa: "Modo Noturno", inicio: 20, fim: 23 },
+  // 23–07: piloto automático (madrugada — só música).
 ];
 
 export type ProgramaAtual = {
