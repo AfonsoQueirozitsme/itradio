@@ -9,8 +9,9 @@
  *        · Rock        default shuffle, agendada 07:00–13:00
  *        · House/EDM   default shuffle, agendada 13:00–23:00
  *        · Madrugada   default shuffle (tudo), agendada 23:00–07:00
- *        · Jingles     once_per_x_songs=2, sequencial [curto, curto, grande]
- *        · <Programa HHMM>  once_per_hour @minuto, janela = a hora, interrupt+single
+ *        · Jingles     once_per_x_songs=2, sequencial [short_1, short_2], sem interrupt
+ *        · <Programa HHMM>  once_per_hour @minuto, janela = a hora, single (sem interrupt)
+ *      (os blocos já trazem, a cada ~30 min, o break de publicidade colado ao fim)
  *   4. limpa o custom_config antigo do Liquidsoap
  *   5. reinicia a estação
  *
@@ -106,12 +107,10 @@ async function main() {
   const allMusic = [...manifest.music.rock, ...manifest.music.house];
   for (const rel of allMusic) await upload(sid, rel);
   console.log(`  ${allMusic.length} músicas`);
-  // jingles: curto (2 cópias para a cadência) + grande
-  await upload(sid, manifest.jingles.curto);
-  const curtoB = "jingles/jingle_curto_b.mp3";
-  await api("POST", `/station/${sid}/files`, { path: curtoB, file: (await readFile(join(BUILD, manifest.jingles.curto))).toString("base64") });
-  await upload(sid, manifest.jingles.grande);
-  console.log("  jingles (curto x2, grande)");
+  // jingles: dois curtos que alternam na troca de música
+  await upload(sid, manifest.jingles.short1);
+  await upload(sid, manifest.jingles.short2);
+  console.log("  jingles (short_1, short_2)");
   for (const b of manifest.blocks) await upload(sid, b.path);
   console.log(`  ${manifest.blocks.length} blocos`);
 
@@ -124,14 +123,15 @@ async function main() {
   await assign(sid, manifest.music.house, [houseId, madrugada]);
   console.log("  música atribuída (rock 07–13, house 13–23, tudo 23–07)");
 
-  // ---- Jingles: sequencial [curto, curto, grande] a cada 2 músicas ----
+  // ---- Jingles: alternam [short_1, short_2] a cada 2 músicas, na troca ----
+  // SEM "interrupt": o jingle entra na troca da música (não a corta a meio),
+  // deixando o crossfade misturar o fade out/in — como pedido.
   console.log("\n[Jingles]");
-  const jingId = await mkPlaylist(sid, { name: "Jingles", type: "once_per_x_songs", source: "songs", order: "sequential", play_per_songs: 2, backend_options: ["interrupt", "single_track"], is_jingle: true, is_enabled: true });
-  // adiciona 1 a 1 para garantir a ordem c, c, grande
-  await assign(sid, [manifest.jingles.curto], [jingId]);
-  await assign(sid, ["jingles/jingle_curto_b.mp3"], [jingId]);
-  await assign(sid, [manifest.jingles.grande], [jingId]);
-  console.log("  jingles: curto, curto, grande (once_per_x_songs=2)");
+  const jingId = await mkPlaylist(sid, { name: "Jingles", type: "once_per_x_songs", source: "songs", order: "sequential", play_per_songs: 2, backend_options: ["single_track"], is_jingle: true, is_enabled: true });
+  // adiciona 1 a 1 para garantir a ordem short_1, short_2
+  await assign(sid, [manifest.jingles.short1], [jingId]);
+  await assign(sid, [manifest.jingles.short2], [jingId]);
+  console.log("  jingles: short_1, short_2 (once_per_x_songs=2, sem interrupt)");
 
   // ---- Blocos falados (once_per_hour, janela = a hora) ----
   console.log("\n[Blocos falados]");
@@ -149,7 +149,9 @@ async function main() {
       source: "songs",
       order: "sequential",
       play_per_hour_minute: min,
-      backend_options: ["interrupt", "single_track"],
+      // SEM "interrupt": o bloco (voz + jingle + eventuais ads) entra na troca
+      // da música em vez de a cortar a meio — evita repetições/duplicados.
+      backend_options: ["single_track"],
       is_enabled: true,
       schedule_items: sched(b.hour * 100, b.hour * 100 + 59),
     });

@@ -9,15 +9,16 @@
  * Produz (tudo em apps/station/build/, gitignored):
  *   - programas/<slug>/<HHMM>.mp3   blocos falados (intro→insert→final) com bed
  *                                   por baixo + jingle curto colado no fim
- *   - musica/rock/*.mp3             SoftRock com metadata limpa
- *   - musica/house/*.mp3           House/EDM com metadata limpa
- *   - jingles/jingle_curto.mp3 · jingle_grande.mp3
+ *   - musica/rock/*.mp3             SoftRock com metadata limpa (sem álbum IT.FM)
+ *   - musica/house/*.mp3           House/EDM com metadata limpa (sem álbum IT.FM)
+ *   - jingles/jingle_short_1.mp3 · jingle_short_2.mp3
  *   - manifest.json                descrição para o deployer
  *
  * Cada bloco falado = concat(intro, insert, [intro2, insert2, …], final)
- * com a news_bed em loop por baixo (volume baixo, fades) + jingle_curto no fim.
- * Assim, quando o AzuraCast toca o bloco: música pára, ouve-se a voz sobre a
- * bed, e no fim o jingle curto — exatamente o pedido.
+ * com a news_bed em loop por baixo (volume baixo, fades) + um jingle no fim.
+ * A cada ~30 min, um bloco leva também um break de publicidade colado ao fim:
+ * jingle · adspot · adspot · jingle (jingle antes e depois, nunca entre os ads).
+ * Os 5 adspots (~/Downloads/AudioNovo/Ads) rodam em pares por todos os breaks.
  */
 
 import { execFile } from "node:child_process";
@@ -86,27 +87,36 @@ async function run(bin, args) {
   await exec(bin, args, { maxBuffer: 1 << 26 });
 }
 
-// Constrói um bloco falado: voz (concat) + bed por baixo + jingle no fim.
-async function buildBlock(voicePaths, jingleCurto, outPath, meta) {
+// Constrói um bloco falado: voz (concat) + bed por baixo + uma "cauda" no fim.
+// `tail` = lista de ficheiros colados a seguir à voz. Bloco normal: [jingle].
+// Bloco com publicidade: [jingle, adA, adB, jingle] (jingle antes e depois dos
+// ads, nunca no meio). Cada faixa da cauda é normalizada antes do concat.
+async function buildBlock(voicePaths, tail, outPath, meta) {
   const durs = await Promise.all(voicePaths.map(dur));
   const voiceDur = durs.reduce((a, b) => a + b, 0);
   const fadeOut = Math.max(0, voiceDur - 1.2);
   const N = voicePaths.length;
-  const bedIdx = N;      // input do bed (com -stream_loop -1)
-  const jingleIdx = N + 1;
+  const bedIdx = N;         // input do bed (com -stream_loop -1)
+  const tailStart = N + 1;  // primeiro input da cauda (jingle/ads)
 
   const inputs = [];
   for (const p of voicePaths) inputs.push("-i", p);
   inputs.push("-stream_loop", "-1", "-i", BED);
-  inputs.push("-i", jingleCurto);
+  for (const t of tail) inputs.push("-i", t);
 
   const voiceLabels = voicePaths.map((_, k) => `[${k}:a]`).join("");
+  const tailPrep = tail
+    .map((_, k) => `[${tailStart + k}:a]aresample=44100,aformat=channel_layouts=stereo[t${k}]`)
+    .join(";");
+  const tailLabels = tail.map((_, k) => `[t${k}]`).join("");
+
   const filter =
     `${voiceLabels}concat=n=${N}:v=0:a=1,aresample=44100,aformat=channel_layouts=stereo,volume=0.92[v];` +
     `[${bedIdx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:${voiceDur.toFixed(3)},` +
     `volume=${BED_VOL},afade=t=in:st=0:d=0.6,afade=t=out:st=${fadeOut.toFixed(3)}:d=1.2[b];` +
     `[v][b]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[body];` +
-    `[body][${jingleIdx}:a]concat=n=2:v=0:a=1,aresample=44100[cat];` +
+    `${tailPrep};` +
+    `[body]${tailLabels}concat=n=${1 + tail.length}:v=0:a=1,aresample=44100[cat];` +
     `[cat]alimiter=limit=0.95[out]`;
 
   await run("ffmpeg", [
@@ -117,7 +127,6 @@ async function buildBlock(voicePaths, jingleCurto, outPath, meta) {
     "-map_metadata", "-1",
     "-metadata", `title=${meta.title}`,
     "-metadata", `artist=${meta.artist}`,
-    "-metadata", `album=IT.FM`,
     "-c:a", "libmp3lame", "-b:a", "192k",
     outPath,
   ]);
@@ -133,15 +142,18 @@ async function main() {
   await mkdir(join(OUT, "jingles"), { recursive: true });
 
   const contrib = join(SRC, "Contribuicoes");
-  const jingleCurto = join(SRC, "jingle_curto.mp3");
-  const jingleGrande = join(SRC, "jingle_grande.mp3");
+  const jingleShort1 = join(SRC, "jingle_short_1.mp3");
+  const jingleShort2 = join(SRC, "jingle_short_2.mp3");
+  const adsDir = join(SRC, "Ads");
+  const ADS = (await readdir(adsDir)).filter((f) => /\.mp3$/i.test(f)).sort().map((f) => join(adsDir, f));
 
-  const manifest = { music: { rock: [], house: [] }, blocks: [], jingles: {}, programs: [] };
+  const manifest = { music: { rock: [], house: [] }, blocks: [], jingles: {}, programs: [], ads: [] };
 
-  // 1) Jingles
-  await copyFile(jingleCurto, join(OUT, "jingles", "jingle_curto.mp3"));
-  await copyFile(jingleGrande, join(OUT, "jingles", "jingle_grande.mp3"));
-  manifest.jingles = { curto: "jingles/jingle_curto.mp3", grande: "jingles/jingle_grande.mp3" };
+  // 1) Jingles (curto = troca de música; também fecham blocos e envolvem os ads)
+  await copyFile(jingleShort1, join(OUT, "jingles", "jingle_short_1.mp3"));
+  await copyFile(jingleShort2, join(OUT, "jingles", "jingle_short_2.mp3"));
+  manifest.jingles = { short1: "jingles/jingle_short_1.mp3", short2: "jingles/jingle_short_2.mp3" };
+  manifest.ads = ADS.map((p) => basename(p));
 
   // 2) Músicas (rock = SoftRock, house = House:EDM)
   const genreDirs = { rock: join(SRC, "Musicas", "SoftRock"), house: join(SRC, "Musicas", "House:EDM") };
@@ -160,20 +172,21 @@ async function main() {
         "-map_metadata", "-1",
         "-metadata", `title=${title}`,
         "-metadata", `artist=${artist}`,
-        "-metadata", `album=IT.FM`,
         "-c:a", "copy", join(OUT, rel),
       ]).catch(async () => {
         // alguns ficheiros não aceitam -c copy com nova tag → re-encode leve
         await run("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-i", join(gdir, f),
           "-map_metadata", "-1", "-metadata", `title=${title}`, "-metadata", `artist=${artist}`,
-          "-metadata", `album=IT.FM`, "-c:a", "libmp3lame", "-b:a", "256k", join(OUT, rel)]);
+          "-c:a", "libmp3lame", "-b:a", "256k", join(OUT, rel)]);
       });
       manifest.music[genre].push(rel);
     }
     console.log(`♪ ${genre}: ${files.length} músicas`);
   }
 
-  // 3) Blocos falados por programa
+  // 3) Blocos falados — recolhe primeiro as specs de todos os programas para
+  //    poder escolher os slots de publicidade globalmente (>= 30 min entre ads).
+  const specs = [];
   for (const prog of PROGRAMS) {
     const pdir = join(SRC, "Programas", prog.dir);
     const files = (await readdir(pdir)).filter((f) => /\.mp3$/i.test(f));
@@ -208,12 +221,39 @@ async function main() {
       const { hour, min } = parseTime(hhmm);
       const HH = String(hour).padStart(2, "0"), MM = String(min).padStart(2, "0");
       const title = labels.size ? [...labels].join(" + ") : prog.locutor;
-      const outRel = `programas/${prog.slug}/${HH}${MM}.mp3`;
-      await buildBlock(voice, jingleCurto, join(OUT, outRel), { title, artist: prog.nome });
-      manifest.blocks.push({ path: outRel, program: prog.nome, slug: prog.slug, hour, min, hhmm: `${HH}${MM}`, title, clips: voice.length });
-      console.log(`  ▸ ${prog.nome} ${HH}:${MM}  (${voice.length} clips${labels.size ? ", " + [...labels].join("+") : ""})`);
+      specs.push({ prog, hour, min, hhmm: `${HH}${MM}`, title, voice, clips: voice.length });
     }
     manifest.programs.push({ nome: prog.nome, locutor: prog.locutor, slug: prog.slug, genero: prog.genero, inicio: prog.inicio, fim: prog.fim });
+  }
+
+  // 3b) Escolhe slots de publicidade: sempre no fim de um bloco falado, com um
+  //     intervalo mínimo entre ads. 2 ads por break, a rodar por todos (pares).
+  const AD_GAP_MIN = 30;
+  specs.sort((a, b) => a.hour * 60 + a.min - (b.hour * 60 + b.min));
+  let lastAd = -Infinity, adCursor = 0;
+  for (const s of specs) {
+    const t = s.hour * 60 + s.min;
+    if (ADS.length >= 2 && t - lastAd >= AD_GAP_MIN) {
+      s.ads = [ADS[adCursor % ADS.length], ADS[(adCursor + 1) % ADS.length]];
+      adCursor += 2;
+      lastAd = t;
+    } else {
+      s.ads = null;
+    }
+  }
+
+  // 3c) Renderiza cada bloco. Cauda = jingle de fecho, ou jingle·ad·ad·jingle.
+  for (const s of specs) {
+    const outRel = `programas/${s.prog.slug}/${s.hhmm}.mp3`;
+    const tail = s.ads
+      ? [jingleShort1, s.ads[0], s.ads[1], jingleShort2]
+      : [jingleShort1];
+    await buildBlock(s.voice, tail, join(OUT, outRel), { title: s.title, artist: s.prog.nome });
+    manifest.blocks.push({
+      path: outRel, program: s.prog.nome, slug: s.prog.slug, hour: s.hour, min: s.min,
+      hhmm: s.hhmm, title: s.title, clips: s.clips, ads: s.ads ? s.ads.map((p) => basename(p)) : null,
+    });
+    console.log(`  ▸ ${s.prog.nome} ${s.hhmm}  (${s.clips} clips${s.ads ? `, +ads ${s.ads.map((p) => basename(p)).join("+")}` : ""})`);
   }
 
   await writeFile(join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));
