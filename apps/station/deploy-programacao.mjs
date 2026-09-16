@@ -10,6 +10,7 @@
  *        · House/EDM   default shuffle, agendada 13:00–23:00
  *        · Madrugada   default shuffle (tudo), agendada 23:00–07:00
  *        · Jingles     once_per_x_songs=2, sequencial [short_1, short_2], sem interrupt
+ *        · Station ID  once_per_hour @minuto 0, jingle longo, 24/7, sem interrupt
  *        · <Programa HHMM>  once_per_hour @minuto, janela = a hora, single (sem interrupt)
  *      (os blocos já trazem, a cada ~30 min, o break de publicidade colado ao fim)
  *   4. limpa o custom_config antigo do Liquidsoap
@@ -107,10 +108,11 @@ async function main() {
   const allMusic = [...manifest.music.rock, ...manifest.music.house];
   for (const rel of allMusic) await upload(sid, rel);
   console.log(`  ${allMusic.length} músicas`);
-  // jingles: dois curtos que alternam na troca de música
+  // jingles: dois curtos que alternam na troca de música + um longo (station ID)
   await upload(sid, manifest.jingles.short1);
   await upload(sid, manifest.jingles.short2);
-  console.log("  jingles (short_1, short_2)");
+  await upload(sid, manifest.jingles.long1);
+  console.log("  jingles (short_1, short_2, long_1)");
   for (const b of manifest.blocks) await upload(sid, b.path);
   console.log(`  ${manifest.blocks.length} blocos`);
 
@@ -132,6 +134,22 @@ async function main() {
   await assign(sid, [manifest.jingles.short1], [jingId]);
   await assign(sid, [manifest.jingles.short2], [jingId]);
   console.log("  jingles: short_1, short_2 (once_per_x_songs=2, sem interrupt)");
+
+  // ---- Station ID: jingle longo uma vez ao topo de cada hora (24/7) ----
+  // once_per_hour @ minuto 0, SEM "interrupt": entra na troca da música mais
+  // próxima do topo da hora (não corta a meio), misturado pelo crossfade.
+  const stationId = await mkPlaylist(sid, {
+    name: "Station ID",
+    type: "once_per_hour",
+    source: "songs",
+    order: "sequential",
+    play_per_hour_minute: 0,
+    backend_options: ["single_track"],
+    is_jingle: true,
+    is_enabled: true,
+  });
+  await assign(sid, [manifest.jingles.long1], [stationId]);
+  console.log("  station ID: jingle_long_1 (once_per_hour @ min 0, sem interrupt)");
 
   // ---- Blocos falados (once_per_hour, janela = a hora) ----
   console.log("\n[Blocos falados]");

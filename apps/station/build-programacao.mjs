@@ -11,7 +11,8 @@
  *                                   por baixo + jingle curto colado no fim
  *   - musica/rock/*.mp3             SoftRock com metadata limpa (sem álbum IT.FM)
  *   - musica/house/*.mp3           House/EDM com metadata limpa (sem álbum IT.FM)
- *   - jingles/jingle_short_1.mp3 · jingle_short_2.mp3
+ *   - jingles/jingle_short_1.mp3 · jingle_short_2.mp3 (troca de música)
+ *   - jingles/jingle_long_1.mp3    (station ID — topo de cada hora)
  *   - manifest.json                descrição para o deployer
  *
  * Cada bloco falado = concat(intro, insert, [intro2, insert2, …], final)
@@ -19,6 +20,7 @@
  * A cada ~30 min, um bloco leva também um break de publicidade colado ao fim:
  * jingle · adspot · adspot · jingle (jingle antes e depois, nunca entre os ads).
  * Os 5 adspots (~/Downloads/AudioNovo/Ads) rodam em pares por todos os breaks.
+ * O jingle longo é o station ID e toca uma vez ao topo de cada hora (deployer).
  */
 
 import { execFile } from "node:child_process";
@@ -144,15 +146,21 @@ async function main() {
   const contrib = join(SRC, "Contribuicoes");
   const jingleShort1 = join(SRC, "jingle_short_1.mp3");
   const jingleShort2 = join(SRC, "jingle_short_2.mp3");
+  const jingleLong1 = join(SRC, "jingle_long_1.mp3");
   const adsDir = join(SRC, "Ads");
   const ADS = (await readdir(adsDir)).filter((f) => /\.mp3$/i.test(f)).sort().map((f) => join(adsDir, f));
 
   const manifest = { music: { rock: [], house: [] }, blocks: [], jingles: {}, programs: [], ads: [] };
 
-  // 1) Jingles (curto = troca de música; também fecham blocos e envolvem os ads)
+  // 1) Jingles (curto = troca de música + fecho de bloco/ads; longo = station ID @ topo da hora)
   await copyFile(jingleShort1, join(OUT, "jingles", "jingle_short_1.mp3"));
   await copyFile(jingleShort2, join(OUT, "jingles", "jingle_short_2.mp3"));
-  manifest.jingles = { short1: "jingles/jingle_short_1.mp3", short2: "jingles/jingle_short_2.mp3" };
+  await copyFile(jingleLong1, join(OUT, "jingles", "jingle_long_1.mp3"));
+  manifest.jingles = {
+    short1: "jingles/jingle_short_1.mp3",
+    short2: "jingles/jingle_short_2.mp3",
+    long1: "jingles/jingle_long_1.mp3",
+  };
   manifest.ads = ADS.map((p) => basename(p));
 
   // 2) Músicas (rock = SoftRock, house = House:EDM)
