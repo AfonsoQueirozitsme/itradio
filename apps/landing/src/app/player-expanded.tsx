@@ -26,8 +26,8 @@ export default function PlayerExpanded({
   const programaTitulo = prog?.programa ?? (now.aoVivo ? "Em direto" : "Piloto automático");
   const locutorLinha = prog ? `com ${prog.locutor.nome}` : "Só música, sem parar";
 
-  // Capa: sempre a foto do programa que está online (não o ícone default da faixa).
-  const capa = prog?.locutor.foto ?? null;
+  // Capa: foto do programa online, ou a imagem do piloto automático (madrugada/só música).
+  const capa = prog?.locutor.foto ?? "/piloto-automatico.jpg";
 
   async function partilhar() {
     const url = typeof window !== "undefined" ? window.location.href : "";

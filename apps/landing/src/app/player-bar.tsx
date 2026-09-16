@@ -43,19 +43,13 @@ export default function PlayerBar() {
         {/* Barra do player (flutuante) */}
         <div className="animate-slide-up flex items-center gap-4 rounded-2xl border border-white/20 bg-brand/80 px-4 py-3 shadow-2xl backdrop-blur-md">
           {/* Locutor / programa */}
-          {prog ? (
-            <Image
-              src={prog.locutor.foto}
-              alt={prog.locutor.nome}
-              width={44}
-              height={44}
-              className="h-11 w-11 shrink-0 rounded-full object-cover ring-2 ring-white/60"
-            />
-          ) : (
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/20 text-lg">
-              🎧
-            </span>
-          )}
+          <Image
+            src={prog?.locutor.foto ?? "/piloto-automatico.jpg"}
+            alt={prog?.locutor.nome ?? "Piloto automático"}
+            width={44}
+            height={44}
+            className="h-11 w-11 shrink-0 rounded-full object-cover ring-2 ring-white/60"
+          />
 
           {/* Radio text (now playing) */}
           <div className="min-w-0 flex-1 text-left">

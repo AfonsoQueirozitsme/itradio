@@ -43,6 +43,23 @@ export function usePlayer() {
   return ctx;
 }
 
+/**
+ * Nome limpo de uma faixa: "Artista - Título" a partir dos campos separados
+ * (ignora o álbum "IT.FM" que polui o `text` do broadcast e o traço à esquerda
+ * das faixas sem artista). Cai para o título ou para o `text` limpo.
+ */
+function songLabel(song: Record<string, unknown> | null | undefined): string | null {
+  const artist = String(song?.artist ?? "").trim();
+  const title = String(song?.title ?? "").trim();
+  if (artist && title) return `${artist} - ${title}`;
+  if (title) return title;
+  const text = String(song?.text ?? "")
+    .replace(/\s*-\s*IT\.FM\s*-\s*/i, " - ") // remove o álbum infiltrado
+    .replace(/^\s*-\s*/, "") // faixa sem artista → tira o traço inicial
+    .trim();
+  return text || null;
+}
+
 /** Deriva a URL do now-playing do AzuraCast a partir da URL do stream. */
 function nowPlayingUrlFrom(streamUrl: string): string | null {
   try {
@@ -115,27 +132,27 @@ export function PlayerProvider({
         const song = data?.now_playing?.song ?? {};
         const aoVivo = Boolean(data?.live?.is_live);
         const streamer = data?.live?.streamer_name?.trim();
-        const texto =
-          (aoVivo && streamer ? streamer : (song.text as string)?.trim()) || null;
+        const texto = (aoVivo && streamer ? streamer : songLabel(song)) || null;
         setNow({ texto, arte: (song.art as string) || null, aoVivo });
 
         const hist = Array.isArray(data?.song_history) ? data.song_history : [];
-        setHistorico(
-          hist
-            .map((h: Record<string, unknown>) => {
-              const s = (h?.song ?? {}) as Record<string, unknown>;
-              const t = (s.text as string)?.trim();
-              return t
-                ? {
-                    id: String(h?.sh_id ?? h?.played_at ?? t),
-                    texto: t,
-                    arte: (s.art as string) || null,
-                  }
-                : null;
-            })
-            .filter(Boolean)
-            .slice(0, 10) as Historico[],
-        );
+        const lista = hist
+          .map((h: Record<string, unknown>) => {
+            const s = (h?.song ?? {}) as Record<string, unknown>;
+            const t = songLabel(s);
+            return t
+              ? {
+                  id: String(h?.sh_id ?? h?.played_at ?? t),
+                  texto: t,
+                  arte: (s.art as string) || null,
+                }
+              : null;
+          })
+          .filter((x): x is Historico => x !== null)
+          // colapsa duplicados seguidos (mesma faixa repetida) para não aparecer 2x
+          .filter((h, i, arr) => i === 0 || h.texto !== arr[i - 1].texto)
+          .slice(0, 10);
+        setHistorico(lista);
       } catch {
         /* ignora falhas de rede pontuais */
       }

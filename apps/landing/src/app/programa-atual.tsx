@@ -36,9 +36,13 @@ export default function ProgramaAtualCard() {
         </>
       ) : (
         <>
-          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/20 text-2xl">
-            🎧
-          </span>
+          <Image
+            src="/piloto-automatico.jpg"
+            alt="Piloto automático"
+            width={56}
+            height={56}
+            className="h-14 w-14 rounded-full object-cover ring-2 ring-white/60"
+          />
           <div className="text-left">
             <p className="text-xs uppercase tracking-wide text-muted">No ar agora</p>
             <p className="text-base font-semibold leading-tight">Piloto automático</p>
