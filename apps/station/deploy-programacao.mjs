@@ -13,8 +13,9 @@
  *        · Station ID  once_per_hour @minuto 0, jingle longo, 24/7, sem interrupt
  *        · <Programa HHMM>  once_per_hour @minuto, janela = a hora, single (sem interrupt)
  *      (os blocos já trazem, a cada ~30 min, o break de publicidade colado ao fim)
- *   4. limpa o custom_config antigo do Liquidsoap
- *   5. reinicia a estação
+ *   4. força fade_in=0/fade_out=0 nos jingles (tocam secos, sem o crossfade)
+ *   5. limpa o custom_config antigo do Liquidsoap
+ *   6. reinicia a estação
  *
  * Uso (no servidor):
  *   set -a; . ~/itradio/apps/station/.env; set +a
@@ -176,6 +177,21 @@ async function main() {
     await assign(sid, [b.path], [pid]);
   }
   console.log(`  ${blocks.length} blocos agendados`);
+
+  // ---- Jingles sem fade (o crossfade da estação é só para as músicas) ----
+  // Por defeito o crossfade "normal" da estação aplica fade-in/out também aos
+  // jingles; forçamos fade_in=0/fade_out=0 por ficheiro para tocarem "secos".
+  console.log("\n[Fade dos jingles]");
+  try {
+    const files = await api("GET", `/station/${sid}/files`);
+    const jinglePaths = new Set([manifest.jingles.short1, manifest.jingles.short2, manifest.jingles.long1]);
+    const em = { amplify: null, cross_start_next: null, cue_in: null, cue_out: null, fade_in: 0, fade_out: 0 };
+    let n = 0;
+    for (const f of (Array.isArray(files) ? files : [])) {
+      if (jinglePaths.has(f.path)) { await api("PUT", `/station/${sid}/file/${f.id ?? f.unique_id}`, { extra_metadata: em }); n++; }
+    }
+    console.log(`  ${n} jingles sem fade-in/out`);
+  } catch (e) { console.log(`  ! fade jingles: ${e.message}`); }
 
   // ---- Limpa custom_config antigo (ducking Liquidsoap) ----
   console.log("\n[Backend]");

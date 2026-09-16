@@ -135,7 +135,7 @@ export function PlayerProvider({
         const texto = (aoVivo && streamer ? streamer : songLabel(song)) || null;
         setNow({ texto, arte: (song.art as string) || null, aoVivo });
 
-        const hist = Array.isArray(data?.song_history) ? data.song_history : [];
+        const hist: Record<string, unknown>[] = Array.isArray(data?.song_history) ? data.song_history : [];
         const lista = hist
           .map((h: Record<string, unknown>) => {
             const s = (h?.song ?? {}) as Record<string, unknown>;
