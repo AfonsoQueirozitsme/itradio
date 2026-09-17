@@ -78,22 +78,37 @@ async function main() {
     plan.push({ prog, rels, existing });
   }
 
-  // colisões de janela com OUTRAS playlists agendadas (informativo — não resolve)
+  // Cedência (Fase 3): a música de programa entra como playlist Standard AGENDADA
+  // e NÃO-interrupting. No liquidsoap gerado pelo AzuraCast fica na camada
+  // "Standard Schedule Switches" — substitui a rotação geral SÓ na sua janela.
+  // Por cima dela ficam, por camadas (cada uma cede à seguinte):
+  //   · IDs de topo de hora + jingles (once_per_hour/x_minutes, "interrupt") →
+  //     interrompem ao :00 (at_most 1) e devolvem logo à música;
+  //   · notícias/segmentos :30 → o nosso injector faz ducking por cima de tudo.
+  // Só há CONFLITO real se outra playlist de MÚSICA (type=default, ativa, não
+  // interrupt) estiver agendada na mesma janela — duas camas a competir.
+  const isInterrupt = (p) => (p.backend_options || []).includes("interrupt") || p.type !== "default";
+  const overlapsWindow = (p, prog) => (p.schedule_items || []).some((si) =>
+    Math.floor(si.start_time / 100) < prog.fim && Math.floor(si.end_time / 100) > prog.inicio);
+
   console.log("\nplano:");
+  let hardConflict = false;
   for (const { prog, rels, existing } of plan) {
     const win = `${String(prog.inicio).padStart(2, "0")}:00–${String(prog.fim).padStart(2, "0")}:00`;
-    const collide = [];
+    const conflicts = [], coexist = [];
     for (const p of playlists) {
       if (existing && p.id === existing.id) continue;
-      for (const si of p.schedule_items || []) {
-        const a = Math.floor(si.start_time / 100), b = Math.floor(si.end_time / 100);
-        if (a < prog.fim && b > prog.inicio) { collide.push(p.name); break; }
-      }
+      if (!overlapsWindow(p, prog)) continue;
+      if (p.is_enabled && !isInterrupt(p)) conflicts.push(p.name);
+      else coexist.push(`${p.name}${p.is_enabled ? "" : " (off)"}`);
     }
-    console.log(`  · "${plName(prog)}" (shuffle, ${win}) — ${rels.length} faixas${existing ? ` [existe→atualiza id ${existing.id}, sem restart]` : " [NOVA→restart]"}`);
-    if (collide.length) console.log(`      ⚠️ janela sobrepõe: ${[...new Set(collide)].join(", ")} (Fase 3 resolve a cedência)`);
+    console.log(`  · "${plName(prog)}" (Standard, shuffle, não-interrupt, ${win}) — ${rels.length} faixas${existing ? ` [existe→atualiza id ${existing.id}, sem restart]` : " [NOVA→restart]"}`);
+    console.log(`      cede a: IDs de topo de hora (interrupt) + notícias/segmentos :30 (ducking do injector); substitui a rotação geral na janela`);
+    if (coexist.length) console.log(`      coexiste (por design, sem conflito): ${[...new Set(coexist)].join(", ")}`);
+    if (conflicts.length) { hardConflict = true; console.log(`      ⚠️ CONFLITO real (outra cama de música na janela): ${[...new Set(conflicts)].join(", ")}`); }
   }
   if (!yes) { console.log("\n(dry-run — nada alterado)"); return; }
+  if (hardConflict) die("há CONFLITO real de janela (outra playlist de música agendada) — resolve antes de aplicar, ou desativa/reagenda a outra");
 
   // aplica
   let createdNew = false;
@@ -107,12 +122,14 @@ async function main() {
       const pl = await createPlaylist(sid, {
         name: plName(prog), type: "default", source: "songs", order: "shuffle",
         is_jingle: false, is_enabled: true, avoid_duplicates: true,
+        backend_options: [],   // SEM "interrupt": Standard não-interrupting → cede aos IDs de hora
         schedule_items: [sched(hhmm(prog.inicio), hhmm(prog.fim))],
       });
       plId = pl.id; createdNew = true;
       console.log(`  + "${plName(prog)}" (id ${plId})`);
     } else {
-      await updatePlaylist(sid, plId, { is_enabled: true, schedule_items: [sched(hhmm(prog.inicio), hhmm(prog.fim))] });
+      // reafirma type/não-interrupt no update — garante que continua na camada certa
+      await updatePlaylist(sid, plId, { is_enabled: true, type: "default", backend_options: [], schedule_items: [sched(hhmm(prog.inicio), hhmm(prog.fim))] });
       console.log(`  ~ "${plName(prog)}" (id ${plId}) atualizada`);
     }
     await assignToPlaylists(sid, rels, [plId]);

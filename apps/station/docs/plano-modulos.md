@@ -89,6 +89,36 @@ Nota: `lib/` com imports relativos (estilo atual) em vez de um package em
 - **Fase 3 — Géneros por programa**: expandir `programs.mjs`, criar playlists por programa em `deploy-programacao` (restart), música curada pelo serviço.
 - **Fase 4 — Automação/retenção/docs**: cron Mac+host, rotação, atualizar READMEs.
 
+## Fase 3 — cedência (música ⇄ IDs de hora ⇄ notícias)
+
+**Verificado (read-only) no liquidsoap gerado + `ConfigWriter.php` do AzuraCast (2026-09-17).**
+O AzuraCast constrói o `radio` por **camadas** (cada `radio = …` embrulha a anterior;
+a de cima tem prioridade). Da base para o topo:
+
+1. `random([...])` — playlists **Standard sem agenda** = rotação geral (`default`, `Rotação Geral`).
+2. **Standard Schedule Switches** (`track_sensitive=true`) — Standard **agendadas e não-interrupt**.
+3. *special* — `once_per_x_minutes`/`songs` sem agenda (ex.: `Jingle 1` = `delay(180.)`).
+4. **Interrupting Schedule Switches** (`track_sensitive=false`) — playlists com `backend_options` a incluir `"interrupt"` (os IDs `Hora NN`, `once_per_hour`, `at_most(1,{0m…})`).
+5. injector `segments_mix.liq` (`radio = mixed`) — faz **ducking** de TUDO para o clip :30.
+
+A distinção interrupt/não-interrupt é o campo `backend_options`:
+`["interrupt","single_track"]` → camada 4 (topo); `[]`/`[""]` → não-interrupt.
+
+**Desenho:** cada programa recebe uma playlist **`type=default` (Standard), agendada à
+sua janela, `backend_options=[]` (não-interrupt)** → cai na **camada 2**. Consequências,
+sem tocar no injector nem na ordenação:
+
+- **Substitui a rotação geral** só dentro da janela (fora, o switch cai em `({true}, radio)`).
+- **Cede aos IDs de topo de hora**: a camada 4 (interrupt, `track_sensitive=false`) corta ao
+  `:00`, toca 1 ID (`at_most 1`) e devolve logo à música do programa.
+- **Cede às notícias/segmentos :30**: o injector (camada 5) faz ducking por cima de tudo.
+- **Cobertura**: programas 07–23 contíguos; 23–07 (noite, sem notícias) cai na rotação geral.
+
+**Conflito real** (a resolver antes do `--yes`) = só outra playlist de **música** (`type=default`,
+ativa, não-interrupt) agendada na mesma janela — duas camas a competir. `music-deploy.mjs`
+distingue isto de coexistência-por-design (IDs, jingles, playlists `off`) e **aborta** se houver
+conflito real. Os IDs `Hora NN` e as `Meteo/Tech` (interrupt/`off`) **não** são conflito.
+
 ## Riscos / decisões
 
 - **Motor de download:** `yt-dlp` (recomendado — robusto, mantido) vs `youtube-download-cli` (assenta em `pytube`, que parte com frequência).
@@ -98,7 +128,7 @@ Nota: `lib/` com imports relativos (estilo atual) em vez de um package em
 
 ## Verificação (fim-a-fim)
 
-1. `python3 music/select.py --genre "Electronic" --n 8` → imprime JSON de faixas.
-2. `node music/music-build.mjs --slug sofia_martins --dry-run --limit 1` → baixa 1 faixa, normaliza, mede LUFS (≈ −16), sem deploy.
-3. `node music/music-deploy.mjs` (sem `--yes`) → mostra playlists/janelas/colisões, nada aplicado.
-4. Deploy real num programa → ouvir no ar; confirmar rotação no manifesto.
+1. `python3 music/select_tracks.py --genre "Dance & Electronic" --n 8` → imprime JSON de faixas. ✓
+2. `node music/music-build.mjs --slug sofia_martins --dry-run --limit 1` → baixa 1 faixa, normaliza, mede LUFS (≈ −16). ✓ (mediu −15.81)
+3. `node --env-file=.env music/music-deploy.mjs --slug sofia_martins` (sem `--yes`) → plano + cedência + conflitos, nada aplicado. ✓
+4. Deploy real num programa → confirmar no `liquidsoap.liq` gerado que a "Música …" está em *Standard Schedule Switches* (não *Interrupting*), ouvir no ar (ID ao `:00`, notícias ao `:30`), confirmar rotação no manifesto.
