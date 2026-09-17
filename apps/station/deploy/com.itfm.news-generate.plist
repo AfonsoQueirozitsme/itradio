@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.itfm.news-generate</string>
+
+    <!-- Gera o boletim LIVE da IT.FM. Corre de hora a hora ao :05; o próprio
+         news-live.mjs só gera nas horas de geração de Lisboa (7,10,13,16,19,22)
+         via GEN_HOURS, salta o TTS se o guião não mudou (hash) e respeita o
+         plafond ElevenLabs (guarda de quota). Airing do boletim é ao :30. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>--env-file=.env</string>
+        <string>news-live.mjs</string>
+        <string>generate</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/afonso.queiroz/Desktop/it_radio/apps/station</string>
+
+    <!-- launchd arranca com PATH mínimo; node/ffmpeg/docker vivem no homebrew -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- Minute=5, restantes campos wildcard → dispara todas as horas ao :05 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Log em ~/Library/Logs (escrito pelo launchd, que NÃO tem acesso TCC ao
+         Desktop; o processo node filho continua a ler/escrever o repo no Desktop).
+         Ver deploy/README.md para o detalhe do gotcha TCC. -->
+    <key>StandardOutPath</key>
+    <string>/Users/afonso.queiroz/Library/Logs/com.itfm.news-generate.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/afonso.queiroz/Library/Logs/com.itfm.news-generate.log</string>
+</dict>
+</plist>

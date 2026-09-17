@@ -5,13 +5,19 @@
  * Lê apps/station/build/ (produzido por build-programacao.mjs) + manifest.json e:
  *   1. (WIPE=1) apaga TODAS as playlists e media antigas da estação
  *   2. sobe músicas (rock/house), jingles e blocos falados
- *   3. cria playlists:
+ *   3. cria playlists — A ORDEM IMPORTA: o Liquidsoap monta um switch de agenda
+ *      first-match-wins, e o que é criado primeiro fica à frente. Por isso os
+ *      falados e o station ID são criados ANTES da música, senão o género (que
+ *      cobre a hora toda) tapava-os e nunca tocavam:
+ *        · Station ID  once_per_hour @minuto 0, jingle longo, 24/7, sem interrupt
+ *        · <Programa HHMM>  default single_track, agendado numa janela de ~10 min
+ *              a partir do minuto do bloco → toca UMA vez, na PRÓXIMA troca de
+ *              música dentro da janela (track_sensitive: não corta a meio),
+ *              e depois devolve o ar ao género. Sem interrupt.
+ *        · Madrugada   default shuffle (tudo), agendada 23:00–07:00
  *        · Rock        default shuffle, agendada 07:00–13:00
  *        · House/EDM   default shuffle, agendada 13:00–23:00
- *        · Madrugada   default shuffle (tudo), agendada 23:00–07:00
  *        · Jingles     once_per_x_songs=2, sequencial [short_1, short_2], sem interrupt
- *        · Station ID  once_per_hour @minuto 0, jingle longo, 24/7, sem interrupt
- *        · <Programa HHMM>  once_per_hour @minuto, janela = a hora, single (sem interrupt)
  *      (os blocos já trazem, a cada ~30 min, o break de publicidade colado ao fim)
  *   4. força fade_in=0/fade_out=0 nos jingles (tocam secos, sem o crossfade)
  *   5. limpa o custom_config antigo do Liquidsoap
@@ -117,7 +123,57 @@ async function main() {
   for (const b of manifest.blocks) await upload(sid, b.path);
   console.log(`  ${manifest.blocks.length} blocos`);
 
-  // ---- Playlists de música ----
+  // ---- Station ID: jingle longo uma vez ao topo de cada hora (24/7) ----
+  // Criado ANTES da música para ficar à frente no switch de agenda (first-match-wins),
+  // senão o género — que cobre a hora toda — tapava-o. once_per_hour @ minuto 0,
+  // SEM "interrupt": entra na troca da música mais próxima do topo da hora.
+  console.log("\n[Station ID]");
+  const stationId = await mkPlaylist(sid, {
+    name: "Station ID",
+    type: "once_per_hour",
+    source: "songs",
+    order: "sequential",
+    play_per_hour_minute: 0,
+    backend_options: ["single_track"],
+    is_jingle: true,
+    is_enabled: true,
+  });
+  await assign(sid, [manifest.jingles.long1], [stationId]);
+  console.log("  station ID: jingle_long_1 (once_per_hour @ min 0, sem interrupt)");
+
+  // ---- Blocos falados (default + janela ~10 min, single_track) ----
+  // Cada bloco é uma playlist "default" agendada numa janela de ~10 min a partir
+  // do seu minuto. Com "single_track" o Liquidsoap gera predicate.at_most(1,{janela}):
+  // o bloco entra UMA vez, na PRÓXIMA troca de música dentro da janela
+  // (track_sensitive → não corta a música a meio) e depois devolve o ar ao género.
+  // Criados ANTES da música para ficarem à frente no switch (first-match-wins) —
+  // era isto que faltava: em once_per_hour a janela era de 1 minuto e ficavam
+  // tapados pelo género, por isso quase nunca tocavam.
+  console.log("\n[Blocos falados]");
+  const usedSlot = new Set(); // evita 2 blocos no mesmo hora:min
+  // ordena por hora:min para atribuir bumps de forma estável
+  const blocks = [...manifest.blocks].sort((a, b) => a.hour * 60 + a.min - (b.hour * 60 + b.min));
+  for (const b of blocks) {
+    let min = b.min;
+    while (usedSlot.has(b.hour * 60 + min)) min += 2; // desencontra colisões (ex.: 13:00)
+    usedSlot.add(b.hour * 60 + min);
+    const HH = String(b.hour).padStart(2, "0"), MM = String(min).padStart(2, "0");
+    const endMin = Math.min(min + 9, 59); // janela de ~10 min, dentro da própria hora
+    const pid = await mkPlaylist(sid, {
+      name: `${b.program} ${HH}${MM}`,
+      type: "default",
+      source: "songs",
+      order: "sequential",
+      // single_track (sem interrupt): toca uma vez na janela, na troca de música.
+      backend_options: ["single_track"],
+      is_enabled: true,
+      schedule_items: sched(b.hour * 100 + min, b.hour * 100 + endMin),
+    });
+    await assign(sid, [b.path], [pid]);
+  }
+  console.log(`  ${blocks.length} blocos (default, janela ~10 min, single_track, à frente do género)`);
+
+  // ---- Playlists de música (criadas DEPOIS: ficam atrás dos falados no switch) ----
   console.log("\n[Playlists música]");
   const madrugada = await mkPlaylist(sid, { name: "Madrugada (tudo)", type: "default", source: "songs", order: "shuffle", is_enabled: true, schedule_items: sched(2300, 700) });
   const rockId = await mkPlaylist(sid, { name: "Rock", type: "default", source: "songs", order: "shuffle", is_enabled: true, schedule_items: sched(700, 1300) });
@@ -135,48 +191,6 @@ async function main() {
   await assign(sid, [manifest.jingles.short1], [jingId]);
   await assign(sid, [manifest.jingles.short2], [jingId]);
   console.log("  jingles: short_1, short_2 (once_per_x_songs=2, sem interrupt)");
-
-  // ---- Station ID: jingle longo uma vez ao topo de cada hora (24/7) ----
-  // once_per_hour @ minuto 0, SEM "interrupt": entra na troca da música mais
-  // próxima do topo da hora (não corta a meio), misturado pelo crossfade.
-  const stationId = await mkPlaylist(sid, {
-    name: "Station ID",
-    type: "once_per_hour",
-    source: "songs",
-    order: "sequential",
-    play_per_hour_minute: 0,
-    backend_options: ["single_track"],
-    is_jingle: true,
-    is_enabled: true,
-  });
-  await assign(sid, [manifest.jingles.long1], [stationId]);
-  console.log("  station ID: jingle_long_1 (once_per_hour @ min 0, sem interrupt)");
-
-  // ---- Blocos falados (once_per_hour, janela = a hora) ----
-  console.log("\n[Blocos falados]");
-  const usedSlot = new Set(); // evita 2 blocos no mesmo hora:min
-  // ordena por hora:min para atribuir bumps de forma estável
-  const blocks = [...manifest.blocks].sort((a, b) => a.hour * 60 + a.min - (b.hour * 60 + b.min));
-  for (const b of blocks) {
-    let min = b.min;
-    while (usedSlot.has(b.hour * 60 + min)) min += 2; // desencontra colisões (ex.: 13:00)
-    usedSlot.add(b.hour * 60 + min);
-    const HH = String(b.hour).padStart(2, "0"), MM = String(min).padStart(2, "0");
-    const pid = await mkPlaylist(sid, {
-      name: `${b.program} ${HH}${MM}`,
-      type: "once_per_hour",
-      source: "songs",
-      order: "sequential",
-      play_per_hour_minute: min,
-      // SEM "interrupt": o bloco (voz + jingle + eventuais ads) entra na troca
-      // da música em vez de a cortar a meio — evita repetições/duplicados.
-      backend_options: ["single_track"],
-      is_enabled: true,
-      schedule_items: sched(b.hour * 100, b.hour * 100 + 59),
-    });
-    await assign(sid, [b.path], [pid]);
-  }
-  console.log(`  ${blocks.length} blocos agendados`);
 
   // ---- Jingles sem fade (o crossfade da estação é só para as músicas) ----
   // Por defeito o crossfade "normal" da estação aplica fade-in/out também aos

@@ -45,3 +45,6 @@ coverage/
 
 # build local da programação (áudio, não versionar)
 apps/station/build/
+
+# Relatórios de loudness gerados em runtime (baseline + logs)
+apps/station/loudness-reports/
