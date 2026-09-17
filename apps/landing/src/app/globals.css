@@ -95,3 +95,22 @@ body {
   );
   background-attachment: fixed;
 }
+
+/* Acessibilidade: respeita "reduzir movimento" do SO (WCAG 2.2.2).
+   Neutraliza os loops infinitos (ping do "no ar agora", equalizador) e as
+   animações de entrada, sem alterar o visual para quem não optou por isso. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Mostra as barras do equalizador inteiras em vez de congeladas a meio ciclo. */
+  .eq-bar {
+    transform: none !important;
+  }
+}

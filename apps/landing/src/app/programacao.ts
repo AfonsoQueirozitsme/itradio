@@ -1,7 +1,7 @@
 // Grelha de locutores da Radio IT.
 //
-// Cada turno é [horaInício, horaFim) em horas locais (0–24). Fora dos turnos
-// definidos assume-se piloto automático (só música).
+// Cada turno é [horaInício, horaFim) em hora local de Lisboa (0–24). Fora dos
+// turnos definidos assume-se piloto automático (só música).
 //
 // >>> EDITA AQUI os horários reais de cada locutor. <<<
 // Os `dias` são opcionais (0 = domingo … 6 = sábado). Sem `dias`, o turno
@@ -16,8 +16,8 @@ export type Locutor = {
 export type Turno = {
   locutor: string; // slug
   programa: string;
-  inicio: number; // hora local, 0–24
-  fim: number; // hora local, 0–24 (exclusivo)
+  inicio: number; // hora local de Lisboa, 0–24
+  fim: number; // hora local de Lisboa, 0–24 (exclusivo)
   dias?: number[]; // 0=dom … 6=sáb; ausente = todos os dias
 };
 
@@ -42,12 +42,39 @@ export const GRELHA: Turno[] = [
 export type ProgramaAtual = {
   locutor: Locutor;
   programa: string;
+  inicio: number;
+  fim: number;
 };
 
-/** Devolve o programa/locutor a dar agora, ou null (piloto automático). */
+const TZ = "Europe/Lisbon";
+
+/**
+ * Hora (0–23) e dia-da-semana (0=dom) em Lisboa para um dado instante,
+ * independente do fuso do servidor (o host de produção corre em UTC).
+ * Usa Intl para respeitar horário de verão automaticamente.
+ */
+export function horaLisboa(date: Date = new Date()): { hora: number; dia: number } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ,
+    hour: "2-digit",
+    weekday: "short",
+    hour12: false,
+  }).formatToParts(date);
+
+  const hourStr = parts.find((p) => p.type === "hour")?.value ?? "0";
+  // "24" (meia-noite em hour12:false nalgumas engines) → 0.
+  const hora = Number(hourStr) % 24;
+
+  const wd = parts.find((p) => p.type === "weekday")?.value ?? "Sun";
+  const dias = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dia = Math.max(0, dias.indexOf(wd));
+
+  return { hora, dia };
+}
+
+/** Devolve o programa/locutor a dar agora (hora de Lisboa), ou null (piloto automático). */
 export function programaAtual(date: Date = new Date()): ProgramaAtual | null {
-  const hora = date.getHours();
-  const dia = date.getDay();
+  const { hora, dia } = horaLisboa(date);
   const turno = GRELHA.find(
     (t) =>
       hora >= t.inicio &&
@@ -57,5 +84,5 @@ export function programaAtual(date: Date = new Date()): ProgramaAtual | null {
   if (!turno) return null;
   const locutor = LOCUTORES[turno.locutor];
   if (!locutor) return null;
-  return { locutor, programa: turno.programa };
+  return { locutor, programa: turno.programa, inicio: turno.inicio, fim: turno.fim };
 }
