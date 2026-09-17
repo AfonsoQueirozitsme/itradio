@@ -48,3 +48,8 @@ apps/station/build/
 
 # Relatórios de loudness gerados em runtime (baseline + logs)
 apps/station/loudness-reports/
+
+# Serviço de música: venv python, build local (mp3 grandes) e histórico de rotação
+apps/station/music/.venv/
+apps/station/build-music/
+apps/station/music/.rotation.json

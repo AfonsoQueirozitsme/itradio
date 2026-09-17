@@ -1,0 +1,6 @@
+# Serviço de música da IT.FM (só no Mac; o host não precisa de python p/ música).
+# Instalar num venv local:
+#   python3 -m venv apps/station/music/.venv
+#   apps/station/music/.venv/bin/pip install -U pip -r apps/station/music/requirements.txt
+ytmusicapi>=1.7
+yt-dlp>=2024.1
