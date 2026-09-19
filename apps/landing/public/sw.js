@@ -14,7 +14,7 @@
  * Sobe CACHE_VERSION sempre que mudares a estratégia ou os ficheiros precached
  * — o activate limpa as caches antigas.
  */
-const CACHE_VERSION = "itfm-v1";
+const CACHE_VERSION = "itfm-v2";
 const PRECACHE = `${CACHE_VERSION}-precache`;
 const RUNTIME = `${CACHE_VERSION}-runtime`;
 
@@ -63,6 +63,13 @@ self.addEventListener("fetch", (event) => {
 
   // Só a mesma origem — o stream e tudo o que é cross-origin passa direto.
   if (url.origin !== self.location.origin) return;
+
+  // Gestão (/gestao) e a sua API: autenticadas e sempre frescas → passam à rede,
+  // nunca cacheadas nem servidas de cache (evita servir páginas atrás de login).
+  if (url.pathname === "/gestao" || url.pathname.startsWith("/gestao/") ||
+      url.pathname.startsWith("/api/gestao")) {
+    return;
+  }
 
   // Dados do Next (RSC) são dinâmicos — nunca cacheados.
   if (url.searchParams.has("_rsc")) return;
