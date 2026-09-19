@@ -20,13 +20,16 @@
 #   - um thread verifica a hora local a cada 2s;
 #   - ao minuto :30, se a hora tiver conteúdo e ainda não disparou nesta hora,
 #     empurra o clip para uma fila (toca UMA vez) e faz o ducking;
+#   - ADICIONALMENTE, ao minuto :00 das horas em NEWS_TOP_OF_HOUR, dispara o
+#     boletim no TOPO da hora (como um noticiário clássico de rádio);
 #   - o fim é agendado pela DURAÇÃO do clip (determinístico), repondo a música.
-# Re-arma sozinho todos os dias (o guard reinicia quando o minuto sai de :30).
+# Re-arma sozinho todos os dias (cada guard reinicia quando sai do seu minuto).
 #
 # Grelha :30 (dia):
 #   transito → 7, 9              (só de manhã)
 #   meteo    → 8, 11             (manhã) + 15 (uma passagem à tarde)
 #   NOTÍCIAS → 10, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23   (o resto do dia)
+# Notícias no TOPO da hora (:00): 19  (boletim das 19h, hora nobre)
 #
 # Os anúncios de topo de hora e os jingles continuam geridos pelo AzuraCast.
 # ============================================================================
@@ -62,6 +65,12 @@ def seg_file_for_hour(h) =
   elsif list.mem(h, [8, 11, 15]) then "meteo"
   elsif list.mem(h, [10, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23]) then "news"
   else "" end
+end
+
+# Horas com notícias no TOPO da hora (minuto :00). O boletim das 19h é o de
+# hora nobre; o das 19:30 (grelha acima) mantém-se, como numa rádio a sério.
+def news_top_of_hour(h) =
+  list.mem(h, [19])
 end
 
 def dur_for(name) =
@@ -109,12 +118,13 @@ def fire_news() =
   log.important(label="itfm_segments", "fim noticias agendado para +#{dur + 0.3}s")
 end
 
-# --- Agendador (flanco em :30, re-arma diariamente) -------------------------
+# --- Agendador (flancos :00 e :30, re-arma diariamente) ---------------------
 # Gatilho manual: `touch #{MEDIA}/.itfm_fire_news` dispara JÁ um boletim de
-# notícias (com ducking), sem esperar pelo :30 e SEM restart — o ficheiro é
+# notícias (com ducking), sem esperar pela grelha e SEM restart — o ficheiro é
 # consumido (removido) no disparo. Útil p/ testes/demo on-air.
 fire_trigger = "#{MEDIA}/.itfm_fire_news"
-last_fired_hour = ref(-1)
+last_fired_hour = ref(-1)   # guard do flanco :30
+last_fired_top  = ref(-1)   # guard do flanco :00 (notícias de topo de hora)
 
 def scheduler() =
   t = time.local()
@@ -124,6 +134,17 @@ def scheduler() =
     log.important(label="itfm_segments", "gatilho manual → fire_news()")
     fire_news()
   end
+  # Notícias no TOPO da hora (:00), guard próprio.
+  if t.min == 0 then
+    if last_fired_top() != t.hour and news_top_of_hour(t.hour) then
+      last_fired_top := t.hour
+      log.important(label="itfm_segments", "topo de hora → fire_news() (#{t.hour}h)")
+      fire_news()
+    end
+  else
+    last_fired_top := -1
+  end
+  # Grelha :30 (segmentos + notícias), guard próprio.
   if t.min == 30 then
     if last_fired_hour() != t.hour then
       name = seg_file_for_hour(t.hour)
