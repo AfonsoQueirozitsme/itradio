@@ -55,6 +55,19 @@ const VOL_KEY = "itfm:volume";
 const MUTED_KEY = "itfm:muted";
 const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1);
 
+// Sem áudio real durante este tempo, com o elemento "a tocar" = ligação morta
+// (socket half-open depois de um restart do backend / blip de rede / wake-from-
+// sleep, que NÃO dispara 'error' nem 'ended') → religa.
+const STALL_MS = 10000;
+// Ritmo do watchdog de progresso.
+const WATCHDOG_MS = 3000;
+// Só repõe o backoff ao fim deste tempo de reprodução ESTÁVEL — senão um link a
+// "piscar" (liga 1s, cai, repete) martelava o stream no piso dos 2s.
+const STABLE_MS = 30000;
+// iOS/Safari rejeita um play() sem gesto do utilizador com este erro.
+const isAutoplayBlocked = (e: unknown) =>
+  e instanceof DOMException && e.name === "NotAllowedError";
+
 /**
  * Nome limpo de uma faixa: "Artista - Título" a partir dos campos separados
  * (ignora o álbum "IT.FM" que polui o `text` do broadcast e o traço à esquerda
@@ -108,6 +121,13 @@ export function PlayerProvider({
   // Religação automática: timer da próxima tentativa + contador para o backoff.
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryAttemptRef = useRef(0);
+  // Watchdog de progresso: instante (ms) em que chegou áudio real pela última vez.
+  const lastProgressRef = useRef(0);
+  // Timer que repõe o backoff só depois de reprodução estável.
+  const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // true quando o play() foi bloqueado por falta de gesto (iOS): pára a religação
+  // automática até o utilizador tocar outra vez.
+  const needsGestureRef = useRef(false);
   // Preenchido dentro do efeito do áudio (fecha sobre o <audio> atual) para o
   // `toggle` também poder disparar uma religação.
   const scheduleReconnectRef = useRef<() => void>(() => {});
@@ -139,12 +159,42 @@ export function PlayerProvider({
         retryTimerRef.current = null;
       }
     };
+    const cancelStable = () => {
+      if (stableTimerRef.current) {
+        clearTimeout(stableTimerRef.current);
+        stableTimerRef.current = null;
+      }
+    };
+    // Marca que chegou áudio real agora (alimenta o watchdog de progresso).
+    const markProgress = () => {
+      lastProgressRef.current = Date.now();
+    };
+
+    // iOS/Safari bloqueou o play() automático (sem gesto): pára a religação e
+    // deixa o botão em estado "tocar" — o próximo toque do utilizador é que religa.
+    const enterNeedsGesture = () => {
+      needsGestureRef.current = true;
+      clearRetry();
+      cancelStable();
+      retryAttemptRef.current = 0;
+      setLoading(false);
+      setPlaying(false);
+    };
+
+    // Repõe o backoff só depois de reprodução ESTÁVEL (evita que um link a
+    // "piscar" — liga 1s, cai, repete — martele o stream no piso dos 2s).
+    const armStable = () => {
+      cancelStable();
+      stableTimerRef.current = setTimeout(() => {
+        retryAttemptRef.current = 0;
+      }, STABLE_MS);
+    };
 
     // Religa ao ponto vivo com backoff exponencial (2s→30s) enquanto o
     // utilizador quiser ouvir. Um restart do backend (ou um blip de rede) deixa
     // de deixar o player morto: recupera sozinho quando o stream voltar.
     const scheduleReconnect = () => {
-      if (!wantPlayRef.current || retryTimerRef.current) return;
+      if (!wantPlayRef.current || needsGestureRef.current || retryTimerRef.current) return;
       const attempt = retryAttemptRef.current;
       // Teto exponencial (2s,4s,8s,16s,30s…) com "equal jitter" (à AWS): metade
       // fixa + metade aleatória. O jitter descorrelaciona as religações — quando
@@ -158,38 +208,103 @@ export function PlayerProvider({
       setLoading(true);
       retryTimerRef.current = setTimeout(() => {
         retryTimerRef.current = null;
-        if (!wantPlayRef.current) return;
+        if (!wantPlayRef.current || needsGestureRef.current) return;
+        markProgress(); // dá uma folga a esta tentativa antes de o watchdog a julgar
         audio.load(); // volta ao ponto vivo, não retoma buffer velho
-        audio.play().catch(() => scheduleReconnect());
+        audio.play().catch((err) => {
+          if (isAutoplayBlocked(err)) {
+            enterNeedsGesture();
+            return;
+          }
+          scheduleReconnect();
+        });
       }, delay);
     };
     scheduleReconnectRef.current = scheduleReconnect;
 
     audio.addEventListener("playing", () => {
-      retryAttemptRef.current = 0; // ligou → repõe o backoff
+      needsGestureRef.current = false;
       clearRetry();
+      markProgress();
       setLoading(false);
       setPlaying(true);
       setError(false);
+      armStable(); // conta 30s de estabilidade antes de repor o backoff
     });
-    audio.addEventListener("pause", () => setPlaying(false));
+    // Progresso real do áudio: alimenta o watchdog e prova que o stream está vivo.
+    audio.addEventListener("timeupdate", markProgress);
+    audio.addEventListener("progress", markProgress);
+    audio.addEventListener("pause", () => {
+      cancelStable();
+      setPlaying(false);
+    });
     audio.addEventListener("waiting", () => {
       if (wantPlayRef.current) setLoading(true);
     });
     audio.addEventListener("error", () => {
       if (!wantPlayRef.current) return;
+      // Ignora o "erro" que o nosso próprio load() dispara ao abortar o fetch anterior.
+      if (audio.error && audio.error.code === MediaError.MEDIA_ERR_ABORTED) return;
+      cancelStable();
       setPlaying(false);
       scheduleReconnect();
     });
     // Numa emissão ao vivo o stream nunca "acaba"; se acaba, a ligação caiu → religa.
     audio.addEventListener("ended", () => {
       if (!wantPlayRef.current) return;
+      cancelStable();
       setPlaying(false);
       scheduleReconnect();
     });
+
+    // Watchdog — o bug central. Um socket half-open (restart do backend, blip de
+    // rede, wake-from-sleep) NÃO dispara 'error' nem 'ended': o browser fica "a
+    // tocar" sem áudio nenhum e o player prendia-se no spinner para sempre. Aqui,
+    // se não chega áudio há STALL_MS e não há já uma religação agendada, forçamos
+    // a religação (load()+play()). É o que faz a auto-cura funcionar de verdade.
+    const watchdog = setInterval(() => {
+      if (!wantPlayRef.current || needsGestureRef.current) return;
+      if (retryTimerRef.current) return; // já há tentativa agendada
+      if (audio.paused) return; // em pausa / ainda não arrancou — o toggle trata
+      if (Date.now() - lastProgressRef.current > STALL_MS) {
+        cancelStable();
+        setPlaying(false); // reflecte o silêncio: o próximo toque religa, não pausa
+        setLoading(true);
+        scheduleReconnect();
+      }
+    }, WATCHDOG_MS);
+
+    // Wake-from-sleep / rede regressou: religa já (o socket morto pode nunca
+    // disparar 'error', por isso não esperamos por ele).
+    const kick = () => {
+      if (!wantPlayRef.current || needsGestureRef.current || document.hidden) return;
+      clearRetry();
+      retryAttemptRef.current = 0;
+      markProgress();
+      audio.load();
+      audio.play().catch((err) => {
+        if (isAutoplayBlocked(err)) {
+          enterNeedsGesture();
+          return;
+        }
+        scheduleReconnect();
+      });
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") kick();
+    };
+    window.addEventListener("online", kick);
+    window.addEventListener("pageshow", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+
     audioRef.current = audio;
     return () => {
       clearRetry();
+      cancelStable();
+      clearInterval(watchdog);
+      window.removeEventListener("online", kick);
+      window.removeEventListener("pageshow", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
       audio.pause();
       audio.src = "";
     };
@@ -314,15 +429,25 @@ export function PlayerProvider({
     }
     try {
       wantPlayRef.current = true;
+      needsGestureRef.current = false; // este toque É o gesto — reautoriza o play
       retryAttemptRef.current = 0;
       setLoading(true);
       setError(false);
-      // Só (re)liga ao ponto vivo na 1ª vez ou depois de erro (senão salta de faixa).
-      if (!startedRef.current || error) audio.load();
+      lastProgressRef.current = Date.now(); // folga para o watchdog na 1ª ligação
+      // Emissão ao vivo: (re)liga sempre ao ponto vivo. Não há posição de buffer
+      // que valha a pena retomar, e retomar buffer velho arrastava áudio atrasado
+      // (e, depois de uma pausa longa, o buffer esgotava e prendia sem religar).
+      audio.load();
       startedRef.current = true;
       setStarted(true);
       await audio.play();
-    } catch {
+    } catch (err) {
+      if (isAutoplayBlocked(err)) {
+        // Improvável num gesto real, mas se acontecer deixa o botão em "tocar".
+        needsGestureRef.current = true;
+        setLoading(false);
+        return;
+      }
       // Não desiste: tenta religar com backoff em vez de morrer no 1º erro.
       scheduleReconnectRef.current();
     }
