@@ -210,6 +210,7 @@ export function PlayerProvider({
         retryTimerRef.current = null;
         if (!wantPlayRef.current || needsGestureRef.current) return;
         markProgress(); // dá uma folga a esta tentativa antes de o watchdog a julgar
+        audio.src = streamUrl; // elemento fresco (essencial no iOS após stream morta)
         audio.load(); // volta ao ponto vivo, não retoma buffer velho
         audio.play().catch((err) => {
           if (isAutoplayBlocked(err)) {
@@ -281,6 +282,7 @@ export function PlayerProvider({
       clearRetry();
       retryAttemptRef.current = 0;
       markProgress();
+      audio.src = streamUrl; // elemento fresco (essencial no iOS após stream morta)
       audio.load();
       audio.play().catch((err) => {
         if (isAutoplayBlocked(err)) {
@@ -437,6 +439,11 @@ export function PlayerProvider({
       // Emissão ao vivo: (re)liga sempre ao ponto vivo. Não há posição de buffer
       // que valha a pena retomar, e retomar buffer velho arrastava áudio atrasado
       // (e, depois de uma pausa longa, o buffer esgotava e prendia sem religar).
+      // No iOS, depois de a stream morrer o elemento fica "vazio"/em erro e um
+      // simples play() falha — e o telemóvel entrega a sessão de media à app de
+      // música do sistema (Apple Music). Reatribuir a src ANTES do load(), dentro
+      // do gesto do toque, garante sempre um elemento fresco e tocável.
+      audio.src = streamUrl;
       audio.load();
       startedRef.current = true;
       setStarted(true);
