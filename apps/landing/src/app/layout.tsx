@@ -38,7 +38,19 @@ export const metadata: Metadata = {
   creator: SITE_NAME,
   publisher: SITE_NAME,
   category: "music",
-  alternates: { canonical: "/" },
+  alternates: {
+    canonical: "/",
+    // Descoberta oEmbed: consumidores que encontrem um link para o site
+    // conseguem incorporar o player automaticamente.
+    types: {
+      "application/json+oembed": [
+        {
+          url: `/api/oembed?url=${encodeURIComponent(SITE_URL + "/")}&format=json`,
+          title: `${SITE_NAME} oEmbed`,
+        },
+      ],
+    },
+  },
   formatDetection: { email: false, address: false, telephone: false },
   openGraph: {
     type: "website",
