@@ -15,7 +15,9 @@ export default function PlayerExpanded({
   closing?: boolean;
   onClose: () => void;
 }) {
-  const { playing, loading, error, now, historico, toggle } = usePlayer();
+  const { playing, loading, error, now, historico, toggle, volume, muted, setVolume, toggleMute } =
+    usePlayer();
+  const silenciado = muted || volume === 0;
   const [copiado, setCopiado] = useState(false);
   // (dock fixo ao fundo do overlay; scroll só na área de conteúdo)
 
@@ -154,6 +156,37 @@ export default function PlayerExpanded({
             )}
           </div>
           <p className="min-w-0 flex-1 truncate text-sm font-medium text-white">{titulo}</p>
+
+          {/* Volume (desktop; no telemóvel manda o volume físico) */}
+          <div className="hidden items-center gap-2 sm:flex">
+            <button
+              type="button"
+              onClick={toggleMute}
+              aria-label={silenciado ? "Repor som" : "Silenciar"}
+              aria-pressed={silenciado}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white"
+            >
+              {silenciado ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M4 9v6h4l5 5V4L8 9H4zm13.5 3l2.7-2.7-1.4-1.4L16 10.6l-2.8-2.7-1.4 1.4L14.6 12l-2.8 2.7 1.4 1.4L16 13.4l2.8 2.7 1.4-1.4L17.5 12z" />
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M4 9v6h4l5 5V4L8 9H4zm11.5 3a4 4 0 0 0-2.2-3.6v7.2A4 4 0 0 0 15.5 12zM13 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" />
+                </svg>
+              )}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={silenciado ? 0 : volume}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              aria-label="Volume"
+              className="h-1 w-24 cursor-pointer accent-white"
+            />
+          </div>
 
           <button
             type="button"

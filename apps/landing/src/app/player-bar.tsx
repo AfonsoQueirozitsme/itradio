@@ -7,7 +7,7 @@ import PlayerExpanded from "./player-expanded";
 import { programaAtual, type ProgramaAtual } from "./programacao";
 
 export default function PlayerBar() {
-  const { playing, loading, error, started, now, toggle } = usePlayer();
+  const { playing, loading, error, started, now, toggle, statusText } = usePlayer();
   const [prog, setProg] = useState<ProgramaAtual | null>(null);
   const [aberto, setAberto] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -39,6 +39,10 @@ export default function PlayerBar() {
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 px-3 pb-3">
+      {/* Região aria-live: anuncia estado/faixa a leitores de ecrã sem interromper. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {statusText}
+      </p>
       <div className="mx-auto max-w-3xl">
         {/* Barra do player (flutuante) */}
         <div className="animate-slide-up flex items-center gap-4 rounded-2xl border border-white/20 bg-brand/80 px-4 py-3 shadow-2xl backdrop-blur-md">
