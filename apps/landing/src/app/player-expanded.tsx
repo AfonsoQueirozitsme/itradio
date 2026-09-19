@@ -157,14 +157,17 @@ export default function PlayerExpanded({
           </div>
           <p className="min-w-0 flex-1 truncate text-sm font-medium text-white">{titulo}</p>
 
-          {/* Volume (desktop; no telemóvel manda o volume físico) */}
-          <div className="hidden items-center gap-2 sm:flex">
+          {/* Volume: só o ícone. Clicar → silenciar; passar o rato / focar →
+              abre um popover com o slider (desktop; no telemóvel manda o
+              volume físico). O `pb-2` do popover mantém a zona de hover
+              contínua entre o botão e o slider. */}
+          <div className="group relative hidden sm:block">
             <button
               type="button"
               onClick={toggleMute}
               aria-label={silenciado ? "Repor som" : "Silenciar"}
               aria-pressed={silenciado}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white"
             >
               {silenciado ? (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -176,16 +179,20 @@ export default function PlayerExpanded({
                 </svg>
               )}
             </button>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={silenciado ? 0 : volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-              aria-label="Volume"
-              className="h-1 w-24 cursor-pointer accent-white"
-            />
+            <div className="pointer-events-none absolute bottom-full left-1/2 z-10 -translate-x-1/2 pb-2 opacity-0 transition-opacity duration-150 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100">
+              <div className="flex items-center rounded-full bg-black/60 px-3 py-2 shadow-lg ring-1 ring-white/15 backdrop-blur-md">
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={silenciado ? 0 : volume}
+                  onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  aria-label="Volume"
+                  className="h-1 w-28 cursor-pointer accent-white"
+                />
+              </div>
+            </div>
           </div>
 
           <button
