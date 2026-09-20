@@ -1,5 +1,7 @@
-// Dados de "Música & estilos". SEAM de ligação: hoje devolve PLACEHOLDERS; quando
-// ligarmos, só este ficheiro muda — a UI que o consome fica igual. Cada programa
+// Dados de "Música & estilos". SEAM de ligação — LIGADO aos dados reais (overlay
+// sobre POOLS/MOCK: nº de faixas e tracks do manifest, recência da rotação, KPIs
+// e próximo rebuild; refreshHistory fica MOCK até à Fase B). Contrato e MOCK ficam
+// FIXOS. Cada programa
 // tem UMA pool de música (playlist AzuraCast "Música <nome>", Standard, shuffle,
 // NÃO-interrupt) que substitui a rotação geral apenas dentro da sua janela de
 // Lisboa. Fontes reais previstas (ver mapa do apps/station):
@@ -29,6 +31,16 @@
 // ligação). Regra de agendamento: nextsong-mode → a rotação geral tem de estar
 // agendada FORA do daytime; a madrugada 23:00–07:00 é coberta pelo deployer da
 // programação. NUNCA gerir segredos/.env aqui.
+
+import {
+  getMusicManifest,
+  getRotationState,
+  lisbonNow,
+  toLisbonStamp,
+  relativeFromNow,
+  proximaOcorrenciaDiariaStamp,
+} from "./azuracast-read";
+import { programaAt } from "./grelha";
 
 export type TrackEstado = "normalizado" | "pendente" | "falhou";
 export type EstadoJanela = "em-janela" | "fora-janela";
@@ -86,14 +98,6 @@ export type RefreshDia = {
   faixasNovas: number;
   duracao: string; // "1h58"
   estado: RefreshEstado;
-};
-
-// Retorno do botão demo "Reconstruir agora" (NÃO persiste). Aponta para os jobs
-// já existentes em _lib/jobs.ts (a página Jobs mostra a execução real ao ligar).
-export type ReconstruirResult = {
-  jobKey: "music-build" | "music-deploy";
-  runId: string;
-  nota: string;
 };
 
 export type MusicaData = {
@@ -336,18 +340,104 @@ const MOCK: MusicaData = {
   ],
 };
 
-// Simula o disparo do botão "Reconstruir agora" (build → deploy). NÃO persiste;
-// devolve um runId determinístico que aponta para a página Jobs ao ligar.
-export function demoReconstruir(slug: string): ReconstruirResult {
-  return {
-    jobKey: "music-build",
-    runId: `music-build-${slug}-demo`,
-    nota: "demonstração — dispara music-build → music-deploy (rotação com teto), sem restart",
-  };
+// Último segmento de um path do manifest ("musica/<slug>/<x>.mp3" → "<x>.mp3").
+// Puro; sem I/O. Base para o fallback de videoId/título quando não há meta.
+function baseName(p: string): string {
+  const seg = p.split("/");
+  return seg[seg.length - 1] || p;
 }
 
 export async function getMusicaData(): Promise<MusicaData> {
-  // TODO(ligação): substituir MOCK por leituras reais (programs.mjs + manifest +
-  // .rotation.json + nowplaying/playlists) mantendo a forma de MusicaData.
-  return MOCK;
+  const clock = lisbonNow();
+
+  // Leituras reais em paralelo (ambas memoizadas por render em azuracast-read):
+  //   manifest → contagem/tracks por slug + updatedAt; rotation → recência (`at`).
+  const [manifest, rotation] = await Promise.all([getMusicManifest(), getRotationState()]);
+
+  // ── Pools — OVERLAY sobre POOLS (base estática). Só os campos DINÂMICOS caem do
+  // manifest/.rotation.json; tudo o resto (playlist/género/janela/cap/lufs/…) fica
+  // de P. Cada campo degrada para o seu valor de P se a leitura falhar; um SUCESSO
+  // a zero/vazio mostra o zero/vazio real (regra de ouro).
+  const pools: Pool[] = POOLS.map((P) => {
+    // faixas — nº de paths do slug no manifest (real-a-zero honesto); degrade → P.faixas.
+    const faixas = manifest ? manifest.music?.[P.slug]?.length ?? 0 : P.faixas;
+
+    // noAr / estadoJanela — só da grelha (Lisboa), sempre disponível, sem I/O.
+    const noAr = programaAt(clock.hhmm)?.slug === P.slug;
+    const estadoJanela: EstadoJanela = noAr ? "em-janela" : "fora-janela";
+
+    // ultimaAtualizacao — `at` mais recente do slug no .rotation.json → Lisboa;
+    // sem entradas válidas (ou sem rotação) → degrade para P.ultimaAtualizacao.
+    let ultimaAtualizacao = P.ultimaAtualizacao;
+    const rotSlug = rotation?.[P.slug];
+    if (rotSlug) {
+      let bestIso = "";
+      let bestMs = -Infinity;
+      for (const t of Object.values(rotSlug)) {
+        if (!t?.at) continue;
+        const ms = Date.parse(t.at);
+        if (Number.isFinite(ms) && ms > bestMs) {
+          bestMs = ms;
+          bestIso = t.at;
+        }
+      }
+      if (bestIso) ultimaAtualizacao = toLisbonStamp(bestIso);
+    }
+
+    // tracks — do manifest (presença no manifest === normalizado); sem array de
+    // paths (manifest ausente/sem slug) → degrade para P.tracks.
+    let tracks = P.tracks;
+    const paths = manifest?.music?.[P.slug];
+    if (Array.isArray(paths)) {
+      tracks = paths.map((path): Track => {
+        const meta = manifest?.tracks?.[path];
+        const videoId = meta?.videoId ?? baseName(path).replace(/\.mp3$/, "");
+        const duracao = Math.max(0, Math.round(meta?.dur ?? 0));
+        const rot = rotation?.[P.slug]?.[videoId];
+        const addedAt = rot?.at ?? manifest?.updatedAt ?? "";
+        return {
+          videoId,
+          artista: meta?.artist ?? "",
+          titulo: meta?.title ?? baseName(path),
+          duracao,
+          duracaoLabel: fmt(duracao),
+          lufs: "−16.0 LUFS",
+          fonte: "yt-dlp · bestaudio",
+          estado: "normalizado",
+          path,
+          addedAt,
+          addedAtLabel: addedAt ? toLisbonStamp(addedAt) : P.ultimaAtualizacao,
+        };
+      });
+    }
+
+    return { ...P, faixas, noAr, estadoJanela, ultimaAtualizacao, tracks };
+  });
+
+  // ── KPIs — soma real do manifest sobre os 6 slugs (real-a-zero); degrade → MOCK.
+  const faixasTotais = manifest
+    ? POOLS.reduce((acc, P) => acc + (manifest.music?.[P.slug]?.length ?? 0), 0)
+    : MOCK.kpis.faixasTotais;
+
+  const kpis: MusicaKpis = {
+    faixasTotais,
+    pools: MOCK.kpis.pools, // 6 (estático)
+    lufsAlvo: MOCK.kpis.lufsAlvo, // estático
+    encode: MOCK.kpis.encode, // estático
+    ultimaAtualizacao: manifest?.updatedAt
+      ? toLisbonStamp(manifest.updatedAt)
+      : MOCK.kpis.ultimaAtualizacao,
+    ultimaAtualizacaoRel: manifest?.updatedAt
+      ? relativeFromNow(manifest.updatedAt)
+      : MOCK.kpis.ultimaAtualizacaoRel,
+    proximoRebuild: proximaOcorrenciaDiariaStamp(5, 0), // próximo 05:00 Lisboa
+    proximoRebuildFonte: MOCK.kpis.proximoRebuildFonte, // estático
+  };
+
+  return {
+    kpis,
+    pools,
+    // refreshHistory: sem fonte real por-dia ainda → aguarda run-log dos jobs (Fase B).
+    refreshHistory: MOCK.refreshHistory,
+  };
 }

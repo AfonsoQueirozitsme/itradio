@@ -9,12 +9,10 @@
 import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import {
-  AZURACAST_BASE_URL,
-  GESTAO_ADMIN_GATE,
-  AZ_PROBE_TIMEOUT_MS,
-  GESTAO_DEV_BYPASS,
-} from "./config";
+import { GESTAO_ADMIN_GATE, GESTAO_DEV_BYPASS } from "./config";
+// azProbe (GET cookie-forward, fail-closed) vive no leitor de dados — fonte
+// única, para o gate de auth e as leituras partilharem exatamente a mesma sonda.
+import { azProbe } from "./azuracast-read";
 
 export type Operator = {
   id: number | string;
@@ -22,24 +20,6 @@ export type Operator = {
   email: string | null;
   roles: { id: number; name: string }[];
 };
-
-// GET a uma rota da API do AzuraCast reencaminhando o cookie de sessão cru do
-// browser. Só GET → a sessão basta, sem X-API-CSRF. NUNCA enviamos Authorization
-// (isso saltaria para o caminho da Bearer key). redirect:"manual" para nunca
-// tratar um eventual 302→login como sucesso.
-async function azProbe(path: string, cookie: string): Promise<Response | null> {
-  try {
-    return await fetch(`${AZURACAST_BASE_URL}${path}`, {
-      headers: { cookie, accept: "application/json" },
-      cache: "no-store",
-      redirect: "manual",
-      signal: AbortSignal.timeout(AZ_PROBE_TIMEOUT_MS),
-    });
-  } catch {
-    // AzuraCast indisponível / timeout → trata como não autenticado (fail-closed).
-    return null;
-  }
-}
 
 // Resolve o operador a partir do cookie de sessão do AzuraCast:
 //   1) GET /api/frontend/account/me   → 200 = sessão válida + identidade

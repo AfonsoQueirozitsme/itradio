@@ -1,6 +1,8 @@
 // Dados dos Jobs (calendário + histórico + scripts editáveis). SEAM de ligação:
-// hoje devolve PLACEHOLDERS; quando ligarmos, só este ficheiro muda. Fontes
-// reais previstas (ver mapa do apps/station):
+// hoje devolve dados PARCIAIS — o corpo de getJobsData() sobrepõe ao MOCK os
+// campos reais que já têm fonte (scripts[].conteudo lido do disco + a última
+// execução de 2 jobs: news-generate e music-daily-refresh); resumo/week/runs
+// continuam MOCK até à Fase B (run-log + journald). Fontes reais (apps/station):
 //   jobs/week  → 3 agendadores reais: launchd (news-live.mjs, :05 nas horas
 //                07/10/13/16/19/22 Lisboa), systemd timer (daily-refresh.mjs,
 //                05:00 Lisboa) e GitHub Actions (autodeploy da landing).
@@ -8,6 +10,13 @@
 //   runs       → .daily.log (journald) + news-state.json + saída dos scripts
 //   scripts    → ficheiros de config/código do apps/station (ver tiers de risco)
 // NB: as horas são de Lisboa (host/container em UTC → converter na ligação).
+
+import {
+  getNewsState,
+  getMusicManifest,
+  readStationFileHead,
+  relativeFromNow,
+} from "./azuracast-read";
 
 export type JobState = "concluido" | "a_correr" | "agendado" | "falhou";
 export type JobRisk = "baixo" | "medio" | "alto";
@@ -552,7 +561,45 @@ const MOCK: JobsData = {
 };
 
 export async function getJobsData(): Promise<JobsData> {
-  // TODO(ligação): substituir MOCK por leituras reais (systemd/journald,
-  // .daily.log, news-state.json, GitHub API) mantendo a forma de JobsData.
-  return MOCK;
+  // Ligação PARCIAL. Só há sinal REAL para dois recortes; o resto fica MOCK:
+  //   • scripts.conteudo → excerto da cabeça do ficheiro do apps/station (código
+  //     /config de repo PÚBLICO — nunca .env; .rotation.json é estado, não segredo).
+  //   • jobs[].ultimaExec/Estado → só news-generate (build/news-state.json) e
+  //     music-daily-refresh (build-music/manifest.json → updatedAt). Os outros
+  //     jobs ficam no MOCK.
+  //   • resumo / week / runs → aguardam a FASE B (run-log dos scripts + journald
+  //     do launchd/systemd); sem essa fonte, mantêm-se no MOCK.
+  const [news, manifest] = await Promise.all([getNewsState(), getMusicManifest()]);
+
+  // ── scripts — sobrepõe SÓ `conteudo` com a cabeça real do ficheiro; qualquer
+  // falha de leitura (null) degrada ao excerto mock. Ficheiro vazio real → "" (o
+  // `??` só cai no mock em null, por isso mostra o vazio honesto).
+  const scripts: EditableScript[] = await Promise.all(
+    SCRIPTS.map(async (s) => {
+      const rel = s.path.replace(/^apps\/station\//, "");
+      const head = await readStationFileHead(rel, 1400);
+      return { ...s, conteudo: head ?? s.conteudo };
+    }),
+  );
+
+  // ── jobs — sobrepõe a última execução SÓ onde há sinal real; caso contrário
+  // mantém os campos do MOCK intactos.
+  const jobs: JobDef[] = JOBS.map((j) => {
+    if (j.key === "news-generate" && news?.at) {
+      return {
+        ...j,
+        ultimaExec: relativeFromNow(news.at),
+        ultimoEstado: "concluido",
+        ultimoResultado: `${news.count ?? "?"} manchetes`,
+      };
+    }
+    if (j.key === "music-daily-refresh" && manifest?.updatedAt) {
+      // ultimoResultado fica o do MOCK (o manifest não traz métricas do refresh).
+      return { ...j, ultimaExec: relativeFromNow(manifest.updatedAt), ultimoEstado: "concluido" };
+    }
+    return j;
+  });
+
+  // resumo/week/runs seguem no MOCK até à Fase B (run-log + journald).
+  return { resumo: MOCK.resumo, jobs, week: MOCK.week, runs: MOCK.runs, scripts };
 }

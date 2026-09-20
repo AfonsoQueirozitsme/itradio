@@ -1,7 +1,8 @@
 // Dados dos Locutores (vozes virtuais da estação — TTS clonadas ElevenLabs,
-// não humanos). SEAM de ligação: hoje devolve PLACEHOLDERS; quando ligarmos, só
-// este ficheiro muda — a UI que o consome fica igual. Fontes reais previstas
-// (ver mapa do apps/station):
+// não humanos). SEAM de ligação — LIGADO (overlay LEVE sobre o MOCK: só `estado`
+// e `horasNoArDia` são dinâmicos, derivados da grelha; voiceId mascarado, bio,
+// modelo, settings e quota ficam mock — sem HTTP ElevenLabs, sem .env). Contrato
+// e MOCK ficam FIXOS. Fontes reais (ver mapa do apps/station):
 //   locutores (notícias) → apps/station/news-live.mjs: vozes clonadas
 //        NEWS_VOICE_A (Ruben Mateus) / NEWS_VOICE_B (Mariana Serrano); tts() faz
 //        POST https://api.elevenlabs.io/v1/text-to-speech/{voiceId}; EL_MODEL
@@ -21,6 +22,9 @@
 // NB: janelas em horas de Lisboa (host/container em UTC → converter na ligação).
 // Segredos (.env: ELEVENLABS_API_KEY, NEWS_VOICE_A/B) NUNCA são geridos aqui;
 // os voice IDs reais (~20 chars alnum) aparecem SEMPRE mascarados (el_••••••XXX).
+
+import { lisbonNow } from "./azuracast-read";
+import { GRELHA, noArAgora } from "./grelha";
 
 export type LocutorEstado = "no_ar" | "ativo" | "em_pausa" | "rascunho";
 // tons StatusChip: no_ar→"live" (ping), ativo→"ok", em_pausa→"warn", rascunho→"neutral"
@@ -230,9 +234,43 @@ const MOCK: LocutoresData = {
   },
 };
 
+// HHMM inteiro (700) → minutos do dia (420). Pura, para somar janelas da grelha.
+const hhmmToMin = (hhmm: number): number => Math.floor(hhmm / 100) * 60 + (hhmm % 100);
+
+// Horas/dia no ar de um locutor de PROGRAMA = soma das janelas da grelha cujo
+// `locutor` é o dele (Lisboa), em horas com 1 casa. Só grelha estática, sem I/O.
+function horasNoArDaGrelha(nome: string): number {
+  const min = GRELHA.filter((p) => p.locutor === nome).reduce(
+    (acc, p) =>
+      acc + p.windows.reduce((a, w) => a + (hhmmToMin(w.fimHHMM) - hhmmToMin(w.inicioHHMM)), 0),
+    0,
+  );
+  return Math.round((min / 60) * 10) / 10;
+}
+
 export async function getLocutoresData(): Promise<LocutoresData> {
-  // TODO(ligação): substituir MOCK por leituras reais — voice IDs/modelo/settings
-  // de news-live.mjs + mapa locutor↔programa de programs.mjs + elQuota() do
-  // /v1/user/subscription. Manter a forma de LocutoresData para não mexer na UI.
-  return MOCK;
+  // OVERLAY LEVE sobre o MOCK: tudo (voz, voiceIdMasked, modelo, settings, bio,
+  // sample, quota…) fica baked; só `estado` e `horasNoArDia` refletem o vivo.
+  // Sem HTTP nem .env aqui — a grelha (Lisboa) é a única fonte, sempre disponível.
+  const clock = lisbonNow();
+  const arNaHora = noArAgora(clock.hhmm); // {programa,locutor,genero,ate} — madrugada => locutor "—"
+
+  const locutores = MOCK.locutores.map((L) => {
+    // Notícias: estado/horas ficam MOCK (co-locução gerada ao vivo, não da grelha).
+    if (L.tipo === "noticias") return L;
+
+    // ── estado — no_ar se este locutor é quem a grelha põe no ar agora; senão
+    // "desliga" o on-air do mock (no_ar → ativo) e preserva pausa/rascunho/ativo.
+    const onAir = arNaHora.locutor === L.nome;
+    const estado: LocutorEstado = onAir ? "no_ar" : L.estado === "no_ar" ? "ativo" : L.estado;
+
+    // ── horasNoArDia — soma real das janelas da grelha deste locutor; 0 (nenhum
+    // programa a bater com o nome) → mantém o mock em vez de mostrar 0 h.
+    const horas = horasNoArDaGrelha(L.nome);
+    const horasNoArDia = horas > 0 ? horas : L.horasNoArDia;
+
+    return { ...L, estado, horasNoArDia };
+  });
+
+  return { locutores, quota: MOCK.quota };
 }

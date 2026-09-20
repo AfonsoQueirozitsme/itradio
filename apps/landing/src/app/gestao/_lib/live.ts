@@ -1,14 +1,25 @@
-// Dados do LIVE (alinhamento ao ar). SEAM de ligação: hoje devolve um
-// alinhamento PLACEHOLDER; quando ligarmos, só este ficheiro muda. Fontes reais
-// previstas (ver mapa do apps/station):
-//   now      → GET /api/nowplaying/{shortcode} (programa, locutor, ouvintes, DJ)
-//   itens    → fila do backend Liquidsoap (request.queue) + grelha :30
-//              (segments_mix.liq) + carts/jingles + blocos de publicidade.
-//              É MATERIAL PRONTO com hora prevista — NÃO são jobs a correr.
-// As horas de início de cada item são CALCULADAS na UI a partir da ordem e das
-// durações (arrastar reordena → recalcula tudo). `decorridoInicial` posiciona o
-// "agora" dentro do bloco (determinístico → sem mismatch de hidratação).
-// NB: horas de Lisboa (host/container em UTC → converter na ligação).
+// Dados do LIVE (alinhamento ao ar). SEAM de ligação — LIGADO aos dados reais.
+// Contrato (LiveData) e MOCK ficam FIXOS: só o corpo de getLiveData() muda.
+//
+// Fontes:
+//   now      → grelha (programa/locutor/género, Lisboa) + GET /api/nowplaying
+//              (ouvintes, DJ ao vivo). programa/locutor vêm da GRELHA, não do
+//              nome de playlist do AzuraCast (que é "Madrugada (tudo)" etc.).
+//   itens    → faixa atual (now_playing) + fila do backend (GET /station/{id}/
+//              queue), tudo kind "musica". A estação da IT.FM não tem locutores/
+//              jingles/anúncios na fila (é música + notícias injetadas ao :30,
+//              fora da fila), por isso o alinhamento REAL é uma lista de música.
+//   blocoInicio/decorridoInicial → início e "elapsed" da faixa atual (now_playing).
+// As horas de cada item são CALCULADAS na UI (ordem + durações); `decorridoInicial`
+// posiciona o "agora" (determinístico → sem mismatch de hidratação).
+// NB: horas de Lisboa — resolvidas no servidor (helpers em azuracast-read).
+//
+// REGRA: leitura falha (ou zero itens reais) → cai no MOCK. now_playing OK mas
+// listeners a zero → mostra o zero real.
+
+import { getListenerDaily, getNowPlaying, getQueue, lisbonNow, toLisbonClock } from "./azuracast-read";
+import type { AzQueueItem, AzSong, AzSpin } from "./azuracast-read";
+import { noArAgora } from "./grelha";
 
 export type LiveKind =
   | "locutor" // passagem de animador (voice-track / DJ ao vivo)
@@ -207,8 +218,83 @@ const MOCK: LiveData = {
   ],
 };
 
+// "Artista — Título" a partir de uma song do AzuraCast (fallback: campo `text`).
+function songTitle(song?: AzSong): string {
+  const a = (song?.artist ?? "").trim();
+  const t = (song?.title ?? "").trim();
+  if (a && t) return `${a} — ${t}`;
+  return t || a || (song?.text ?? "").trim() || "Faixa";
+}
+
+// Detalhe/fonte de uma faixa a partir da playlist do AzuraCast.
+const faixaDetalhe = (playlist?: string): string => (playlist ? `pool ${playlist}` : "rotação");
+const faixaFonte = (playlist?: string): string =>
+  playlist ? `AzuraCast · ${playlist}` : "AzuraCast · fila";
+
+// now_playing / playing_next (AzSpin) → item de música do alinhamento.
+function spinToItem(spin: AzSpin, id: string): LiveItem {
+  return {
+    id,
+    kind: "musica",
+    titulo: songTitle(spin.song),
+    detalhe: faixaDetalhe(spin.playlist),
+    duracao: Math.max(1, Math.round(spin.duration ?? 0)),
+    fonte: faixaFonte(spin.playlist),
+  };
+}
+
+// Item da fila do backend (AzQueueItem) → item de música do alinhamento.
+function queueToItem(q: AzQueueItem, idx: number): LiveItem {
+  return {
+    id: `q-${idx}-${q.cued_at ?? q.played_at ?? ""}`,
+    kind: "musica",
+    titulo: songTitle(q.song),
+    detalhe: faixaDetalhe(q.playlist),
+    duracao: Math.max(1, Math.round(q.duration ?? 0)),
+    fonte: faixaFonte(q.playlist),
+  };
+}
+
 export async function getLiveData(): Promise<LiveData> {
-  // TODO(ligação): substituir MOCK por nowplaying + fila do backend + grelha.
-  // Manter a forma de LiveData para não mexer na UI.
-  return MOCK;
+  const clock = lisbonNow();
+
+  const [np, queue, daily] = await Promise.all([getNowPlaying(), getQueue(), getListenerDaily()]);
+
+  // Sem nowplaying → não há estado real do ar: cai tudo no MOCK.
+  if (!np) return MOCK;
+
+  // ── now — programa/locutor/género da GRELHA; ouvintes/DJ do nowplaying.
+  const grid = noArAgora(clock.hhmm);
+  const dailyYs = Array.isArray(daily) ? daily.map((d) => d.y) : null;
+  const ouvintesDelta =
+    dailyYs && dailyYs.length >= 2 ? dailyYs[dailyYs.length - 1] - dailyYs[dailyYs.length - 2] : 0;
+  const now: LiveNow = {
+    programa: grid.programa,
+    locutor: grid.locutor,
+    genero: grid.genero,
+    ouvintes: np.listeners?.total ?? 0,
+    ouvintesDelta,
+    aoVivo: np.live?.is_live ?? false,
+  };
+
+  // ── itens — faixa atual + fila (ou playing_next se a fila vier vazia).
+  const itens: LiveItem[] = [];
+  const cur = np.now_playing;
+  if (cur?.song) itens.push(spinToItem(cur, `np-${cur.sh_id ?? "now"}`));
+  if (Array.isArray(queue) && queue.length) {
+    queue.forEach((q, i) => itens.push(queueToItem(q, i)));
+  } else if (np.playing_next?.song) {
+    itens.push(spinToItem(np.playing_next, `np-next-${np.playing_next.sh_id ?? ""}`));
+  }
+
+  // Nenhum item real (a estação toca sempre algo → isto sinaliza leitura torta):
+  // cai no MOCK para não mostrar um alinhamento vazio.
+  if (itens.length === 0) return MOCK;
+
+  // blocoInicio/decorridoInicial = início e "elapsed" da faixa atual. Sem faixa
+  // atual (só fila) → arranca "agora", elapsed 0.
+  const blocoInicio = cur?.played_at ? toLisbonClock(cur.played_at, "s") : clock.clock;
+  const decorridoInicial = cur?.song ? Math.max(0, Math.round(cur.elapsed ?? 0)) : 0;
+
+  return { now, blocoInicio, decorridoInicial, itens };
 }

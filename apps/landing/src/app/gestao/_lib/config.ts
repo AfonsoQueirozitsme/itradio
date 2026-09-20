@@ -16,6 +16,18 @@ export const AZURACAST_BASE_URL = (
 // GESTAO_ADMIN_GATE=/api/admin/users.
 export const GESTAO_ADMIN_GATE = process.env.GESTAO_ADMIN_GATE ?? "/api/admin/stations";
 
+// Estação-alvo no AzuraCast. `AZ_STATION_ID` para as rotas /api/station/{id}/…;
+// `AZ_SHORTCODE` para o nowplaying público /api/nowplaying/{shortcode}. Valores
+// da IT.FM (station 1, shortcode it.fm); overridáveis por env para outras montagens.
+export const AZ_STATION_ID = process.env.AZ_STATION_ID ?? "1";
+export const AZ_SHORTCODE = process.env.AZ_SHORTCODE ?? "it.fm";
+
+// Override opcional da raiz do apps/station (ficheiros runtime do serviço de
+// música + injector, FORA do checkout da landing). Sem override, o leitor de
+// dados tenta candidatos derivados do cwd (ver azuracast-read.ts). Nunca é
+// segredo — é só um caminho de sistema de ficheiros.
+export const ITFM_STATION_DIR = process.env.ITFM_STATION_DIR ?? null;
+
 // Diretório de dados runtime, FORA da árvore git — o deploy faz `git reset
 // --hard` e apagaria tudo o que estivesse dentro do repo. Criado na VPS em
 // /home/itradio/itfm-data (uploads, schedule.json, etc., nas fases seguintes).
