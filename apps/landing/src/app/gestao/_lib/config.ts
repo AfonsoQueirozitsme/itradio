@@ -21,5 +21,13 @@ export const GESTAO_ADMIN_GATE = process.env.GESTAO_ADMIN_GATE ?? "/api/admin/st
 // /home/itradio/itfm-data (uploads, schedule.json, etc., nas fases seguintes).
 export const ITFM_DATA_DIR = process.env.ITFM_DATA_DIR ?? "/home/itradio/itfm-data";
 
+// DEV-ONLY: renderiza o painel sem sessão AzuraCast, para construir a UI local
+// (onde não há AzuraCast em localhost:80). Cadeado DUPLO: só fora de produção E
+// com opt-in explícito. Server-only (sem prefixo NEXT_PUBLIC) → nunca vai para o
+// bundle do cliente; `next build`/`next start` forçam NODE_ENV=production, por
+// isso este ramo é código MORTO em produção, aconteça o que acontecer ao env.
+export const GESTAO_DEV_BYPASS =
+  process.env.NODE_ENV !== "production" && process.env.GESTAO_DEV_BYPASS === "1";
+
 // Timeout das sondas de sessão ao AzuraCast (ms).
 export const AZ_PROBE_TIMEOUT_MS = 4000;
