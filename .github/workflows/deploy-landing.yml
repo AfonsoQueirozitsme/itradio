@@ -1,0 +1,72 @@
+name: Deploy landing (VPS)
+
+# Autodeploy da landing (apps/landing) via runner self-hosted no VPS.
+#
+# SEGURANÇA — o repositório é PÚBLICO. Um runner self-hosted num repo público é
+# perigoso se correr workflows de forks (PRs de forks poderiam executar código
+# arbitrário na máquina). Defesas aqui:
+#   1. dispara SÓ em `push` no `main` (nunca `pull_request`), portanto forks não
+#      conseguem acionar este workflow;
+#   2. `if: github.repository == '...'` bloqueia execução em repos forkados;
+#   3. nas definições do repo, "Fork pull request workflows" deve exigir
+#      aprovação, e o runner deve estar num grupo restrito a este repo.
+# Ver docs/autodeploy.md para o registo do runner e o hardening.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/landing/**"
+      - ".github/workflows/deploy-landing.yml"
+  workflow_dispatch: {} # permite deploy manual a partir do Actions
+
+concurrency:
+  group: deploy-landing
+  cancel-in-progress: false # nunca cancelar um deploy a meio
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Só corre para pushes DESTE repositório — nunca a partir de um fork.
+    if: github.repository == 'AfonsoQueirozitsme/itradio'
+    runs-on: [self-hosted, itfm-vps]
+    steps:
+      - name: Deploy in place
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Diretório de onde a landing corre no VPS (definido no ambiente do
+          # runner — ver docs/autodeploy.md). Falha cedo se não estiver definido.
+          DIR="${ITFM_LANDING_DIR:?define ITFM_LANDING_DIR no ambiente do runner}"
+          echo "→ deploy landing em $DIR  (commit ${GITHUB_SHA::7})"
+          cd "$DIR"
+
+          # Traz exatamente o commit que disparou o workflow (determinístico).
+          git fetch --prune origin main
+          git reset --hard "$GITHUB_SHA"
+
+          cd apps/landing
+          npm ci --no-audit --no-fund
+          npm run build
+
+          # Restart: usa ITFM_LANDING_RESTART se definido; senão tenta systemd,
+          # depois pm2. Sem nenhum, falha explicitamente (não deixa a versão nova
+          # por servir em silêncio).
+          if [ -n "${ITFM_LANDING_RESTART:-}" ]; then
+            echo "→ restart via ITFM_LANDING_RESTART"
+            eval "$ITFM_LANDING_RESTART"
+          elif command -v systemctl >/dev/null 2>&1 \
+               && systemctl list-unit-files 2>/dev/null | grep -q '^itfm-landing\.service'; then
+            echo "→ restart via systemd (itfm-landing)"
+            sudo systemctl restart itfm-landing
+          elif command -v pm2 >/dev/null 2>&1 && pm2 describe itfm-landing >/dev/null 2>&1; then
+            echo "→ restart via pm2 (itfm-landing)"
+            pm2 restart itfm-landing --update-env
+          else
+            echo "::error::sem método de restart — define ITFM_LANDING_RESTART no runner"
+            exit 1
+          fi
+
+          echo "✓ landing no ar  ($(date -Is))"

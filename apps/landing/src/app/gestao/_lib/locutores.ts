@@ -37,8 +37,9 @@ export type VoiceSettings = {
 };
 
 export type LocutorSample = {
-  texto: string; // frase de exemplo (preview SIMULADO — sem áudio real)
-  dur: number; // segundos (usado para o timer/barra da demonstração)
+  texto: string; // frase de exemplo
+  dur: number; // segundos (duração do sample)
+  ficheiro?: string; // path relativo (ex.: "samples/tomas_rocha.mp3"); sem ficheiro → player simulado
 };
 
 export type Locutor = {
@@ -100,7 +101,7 @@ const MOCK: LocutoresData = {
       horasNoArDia: 3.0,
       estado: "ativo",
       bio: "Arranca a manhã com rock e boa energia para pôr a cidade a mexer.",
-      sample: { texto: "Bom dia! São 7 horas e isto é o Boot Matinal, na IT.FM.", dur: 11 },
+      sample: { texto: "Bom dia! São 7 horas e isto é o Boot Matinal, na IT.FM.", dur: 11, ficheiro: "samples/rodrigo_neves.mp3" },
       tipo: "programa",
     },
     {
@@ -120,7 +121,7 @@ const MOCK: LocutoresData = {
       horasNoArDia: 3.0,
       estado: "ativo",
       bio: "Dá o ritmo do meio-dia — dança e eletrónica, com salto ao Tuga Underground.",
-      sample: { texto: "Ctrl, Alt, Ritmo — arranca o teu meio-dia com a IT.FM.", dur: 9 },
+      sample: { texto: "Ctrl, Alt, Ritmo — arranca o teu meio-dia com a IT.FM.", dur: 9, ficheiro: "samples/sofia_martins.mp3" },
       tipo: "programa",
     },
     {
@@ -140,7 +141,7 @@ const MOCK: LocutoresData = {
       horasNoArDia: 3.0,
       estado: "no_ar",
       bio: "Companhia da tarde — o melhor indie e alternativo, sem pressas.",
-      sample: { texto: "Boa tarde! São 14 horas e isto é o Pause & Play, com o Tomás Rocha.", dur: 13 },
+      sample: { texto: "Boa tarde! São 14 horas e isto é o Pause & Play, com o Tomás Rocha.", dur: 13, ficheiro: "samples/tomas_rocha.mp3" },
       tipo: "programa",
     },
     {
@@ -160,7 +161,7 @@ const MOCK: LocutoresData = {
       horasNoArDia: 4.0,
       estado: "ativo",
       bio: "Leva-te a casa na hora de ponta — hip-hop e energia no trânsito.",
-      sample: { texto: "Hora de ponta na IT.FM — vamos abrir caminho até casa.", dur: 9 },
+      sample: { texto: "Hora de ponta na IT.FM — vamos abrir caminho até casa.", dur: 9, ficheiro: "samples/beatriz_lima.mp3" },
       tipo: "programa",
     },
     {
@@ -180,7 +181,7 @@ const MOCK: LocutoresData = {
       horasNoArDia: 3.0,
       estado: "em_pausa",
       bio: "O lado calmo da noite — R&B, soul e conversas em tom baixo.",
-      sample: { texto: "Boa noite. Isto é o Modo Noturno, para acalmar o ritmo.", dur: 10 },
+      sample: { texto: "Boa noite. Isto é o Modo Noturno, para acalmar o ritmo.", dur: 10, ficheiro: "samples/goncalo_pires.mp3" },
       tipo: "programa",
     },
     {
@@ -200,7 +201,7 @@ const MOCK: LocutoresData = {
       horasNoArDia: 0.2,
       estado: "ativo",
       bio: "Pivot masculino do boletim — alterna manchetes de 3 em 3h.",
-      sample: { texto: "IT.FM, notícias. As manchetes desta tarde.", dur: 8 },
+      sample: { texto: "IT.FM, notícias. As manchetes desta tarde.", dur: 8, ficheiro: "samples/ruben_mateus.mp3" },
       tipo: "noticias",
     },
     {
@@ -220,7 +221,7 @@ const MOCK: LocutoresData = {
       horasNoArDia: 0.2,
       estado: "ativo",
       bio: "Pivot feminino — co-locução com o Ruben sobre a news_bed.",
-      sample: { texto: "Mais sobre este tema já a seguir, aqui na IT.FM.", dur: 9 },
+      sample: { texto: "Mais sobre este tema já a seguir, aqui na IT.FM.", dur: 9, ficheiro: "samples/mariana_serrano.mp3" },
       tipo: "noticias",
     },
   ],

@@ -15,7 +15,7 @@
 // → reescreve segments_mix.liq + deploy-segments.mjs (PUT custom_config + 1
 // restart do backend, com backup). Segredos (.env) nunca são geridos aqui.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardHeader, StatusChip } from "./ui";
 import { IconClock, IconPlay, IconClose, IconAlert, IconCheck, IconChevronRight } from "./icons";
 import type { SegmentosData, Segmento, SegTipo } from "../../_lib/segmentos";
@@ -69,6 +69,8 @@ export default function SegmentosBoard({ data }: { data: SegmentosData }) {
   const [selId, setSelId] = useState<string | null>(null);
   const [disparos, setDisparos] = useState(data.resumo.disparosHoje);
   const [heroFired, setHeroFired] = useState(false);
+  const [fireState, setFireState] = useState<"idle" | "firing" | "ok" | "error">("idle");
+  const [fireError, setFireError] = useState<string | null>(null);
 
   // relógio de Lisboa (arranca do valor determinístico do seam)
   const baseSec = useMemo(() => parseHHMM(data.agoraLisboa), [data.agoraLisboa]);
@@ -91,10 +93,25 @@ export default function SegmentosBoard({ data }: { data: SegmentosData }) {
       prev.map((s) => (s.id === id ? { ...s, estado: s.estado === "ativo" ? "pausado" : "ativo" } : s)),
     );
   }
-  function dispararNoticias() {
-    setDisparos((v) => v + 1);
-    setHeroFired(true);
-    setTimeout(() => setHeroFired(false), 2200);
+  async function dispararNoticias() {
+    if (fireState === "firing") return;
+    setFireState("firing");
+    setFireError(null);
+    try {
+      const res = await fetch("/api/gestao/fire", { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: "Erro desconhecido" }));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      setFireState("ok");
+      setDisparos((v) => v + 1);
+      setHeroFired(true);
+      setTimeout(() => { setHeroFired(false); setFireState("idle"); }, 3000);
+    } catch (err) {
+      setFireState("error");
+      setFireError(err instanceof Error ? err.message : "Erro ao disparar");
+      setTimeout(() => setFireState("idle"), 5000);
+    }
   }
 
   return (
@@ -133,20 +150,29 @@ export default function SegmentosBoard({ data }: { data: SegmentosData }) {
           </div>
         </div>
 
-        {/* Disparar agora — só notícias (mapeia a `touch .itfm_fire_news`) */}
+        {/* Disparar agora — só notícias (touch .itfm_fire_news → Liquidsoap dispara) */}
         {heroSeg?.disparoManual ? (
           <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-3">
             <button
               type="button"
               onClick={dispararNoticias}
-              className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-[#0b3d1a] transition-transform hover:scale-105"
+              disabled={fireState === "firing"}
+              className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-[#0b3d1a] transition-transform hover:scale-105 disabled:opacity-50 disabled:hover:scale-100"
             >
-              <IconPlay className="h-4 w-4" />
-              Disparar agora (demo)
+              {fireState === "firing" ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#0b3d1a]/30 border-t-[#0b3d1a]" />
+              ) : (
+                <IconPlay className="h-4 w-4" />
+              )}
+              {fireState === "firing" ? "A disparar..." : "Disparar agora"}
             </button>
             {heroFired ? (
               <StatusChip tone="ok" dot>
-                Disparado — demonstração
+                Disparado no ar
+              </StatusChip>
+            ) : fireState === "error" ? (
+              <StatusChip tone="danger" dot>
+                {fireError ?? "Erro ao disparar"}
               </StatusChip>
             ) : (
               <span className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--gray)]">
@@ -297,6 +323,8 @@ export default function SegmentosBoard({ data }: { data: SegmentosData }) {
           onClose={() => setSelId(null)}
           onToggleEstado={() => toggleEstado(selected.id)}
           onFire={dispararNoticias}
+          fireState={fireState}
+          fireError={fireError}
         />
       ) : null}
     </div>
@@ -399,37 +427,44 @@ function SegmentoDrawer({
   onClose,
   onToggleEstado,
   onFire,
+  fireState,
+  fireError,
 }: {
   seg: Segmento;
   onClose: () => void;
   onToggleEstado: () => void;
   onFire: () => void;
+  fireState: "idle" | "firing" | "ok" | "error";
+  fireError: string | null;
 }) {
   const isInjector = seg.fonte.mecanismo === "injector";
   const d = seg.ducking;
 
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [prog, setProg] = useState(0);
   const [duckPct, setDuckPct] = useState(d ? d.musicaVolPct : 50);
-  const [fired, setFired] = useState(false);
   const [aplic, setAplic] = useState<"idle" | "a_correr" | "feito">("idle");
   const [aplicProg, setAplicProg] = useState(0);
   const [confirmo, setConfirmo] = useState(false);
 
-  // player fake
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      setProg((v) => {
-        if (v >= 100) {
-          setPlaying(false);
-          return 100;
-        }
-        return v + 2;
+  // audio file path: use the preview corpo when it's audio, otherwise fallback
+  const audioPath = seg.preview.tipo === "audio" ? seg.preview.corpo : "programas/noticias_live.mp3";
+
+  function togglePlay() {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(`/api/gestao/audio?path=${encodeURIComponent(audioPath)}`);
+      audioRef.current.addEventListener("timeupdate", () => {
+        const a = audioRef.current;
+        if (a && a.duration) setProg((a.currentTime / a.duration) * 100);
       });
-    }, 120);
-    return () => clearInterval(id);
-  }, [playing]);
+      audioRef.current.addEventListener("ended", () => { setPlaying(false); setProg(0); });
+    }
+    if (playing) { audioRef.current.pause(); setPlaying(false); }
+    else { audioRef.current.play(); setPlaying(true); }
+  }
+
+  useEffect(() => () => { audioRef.current?.pause(); audioRef.current = null; }, []);
 
   // "Aplicar" simulado (dry-run → restart)
   useEffect(() => {
@@ -454,12 +489,6 @@ function SegmentoDrawer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  function fireLocal() {
-    onFire();
-    setFired(true);
-    setTimeout(() => setFired(false), 2200);
-  }
 
   const fonteRows: { label: string; valor: string }[] = [
     { label: "Mecanismo", valor: isInjector ? "Injetor (segments_mix.liq)" : "AzuraCast (cart)" },
@@ -666,7 +695,7 @@ function SegmentoDrawer({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setPlaying((v) => !v)}
+                  onClick={togglePlay}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--ink)] text-white transition-transform hover:scale-105"
                   aria-label={playing ? "Pausar" : "Reproduzir"}
                 >
@@ -700,15 +729,24 @@ function SegmentoDrawer({
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={fireLocal}
-                  className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink)] transition-colors hover:border-[var(--ink)]/30 hover:bg-[var(--bg)]"
+                  onClick={onFire}
+                  disabled={fireState === "firing"}
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-1.5 text-xs font-semibold text-[var(--ink)] transition-colors hover:border-[var(--ink)]/30 hover:bg-[var(--bg)] disabled:opacity-50 disabled:hover:bg-transparent"
                 >
-                  <IconPlay className="h-3.5 w-3.5" />
-                  Disparar agora (demo)
+                  {fireState === "firing" ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--ink)]/30 border-t-[var(--ink)]" />
+                  ) : (
+                    <IconPlay className="h-3.5 w-3.5" />
+                  )}
+                  {fireState === "firing" ? "A disparar..." : "Disparar agora"}
                 </button>
-                {fired ? (
+                {fireState === "ok" ? (
                   <StatusChip tone="ok" dot>
-                    Disparado — demonstração
+                    Disparado no ar
+                  </StatusChip>
+                ) : fireState === "error" ? (
+                  <StatusChip tone="danger" dot>
+                    {fireError ?? "Erro ao disparar"}
                   </StatusChip>
                 ) : (
                   <span className="font-mono text-[11px] text-[var(--gray)]">

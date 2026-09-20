@@ -248,3 +248,47 @@ export function IconChevronDown(p: IconProps) {
     </Svg>
   );
 }
+
+export function IconFolder(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+    </Svg>
+  );
+}
+
+export function IconUpload(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m17 8-5-5-5 5M12 3v12" />
+    </Svg>
+  );
+}
+
+export function IconFolderPlus(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" />
+      <path d="M12 11v6M9 14h6" />
+    </Svg>
+  );
+}
+
+export function IconDownload(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m7 10 5 5 5-5M12 15V3" />
+    </Svg>
+  );
+}
+
+export function IconFile(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+      <path d="M14 2v6h6" />
+    </Svg>
+  );
+}

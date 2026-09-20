@@ -17,7 +17,7 @@
 // REGRA: leitura falha (ou zero itens reais) → cai no MOCK. now_playing OK mas
 // listeners a zero → mostra o zero real.
 
-import { getListenerDaily, getNowPlaying, getQueue, lisbonNow, toLisbonClock } from "./azuracast-read";
+import { getHistory, getListenerDaily, getNowPlaying, getQueue, lisbonDateISO, lisbonNow, toLisbonClock } from "./azuracast-read";
 import type { AzQueueItem, AzSong, AzSpin } from "./azuracast-read";
 import { noArAgora } from "./grelha";
 
@@ -54,7 +54,9 @@ export type LiveData = {
   now: LiveNow;
   blocoInicio: string; // "14:00" — início do alinhamento carregado (Lisboa)
   decorridoInicial: number; // segundos já decorridos no bloco → posiciona o "agora"
-  itens: LiveItem[];
+  itens: LiveItem[]; // visible items: last N history + current + queue
+  historial: LiveItem[]; // full history (oldest→newest), for "load more" navigation
+  historialVisivel: number; // how many history items are in `itens` (default 2)
 };
 
 const GUIAO_ABERTURA = `Boa tarde! São 14 horas e isto é o Pause & Play, com o Tomás Rocha. Nas próximas horas: o melhor indie e alternativo, uma passagem pelas notícias das 30 e o trânsito à saída do trabalho. Fica connosco — a seguir, MGMT.`;
@@ -71,6 +73,8 @@ const MOCK: LiveData = {
   blocoInicio: "14:00",
   // 153 s → itens 1 e 2 já passaram; a 1ª música está a ~2:00/3:49 no ar.
   decorridoInicial: 153,
+  historial: [],
+  historialVisivel: 0,
   itens: [
     {
       id: "it-01",
@@ -231,34 +235,76 @@ const faixaDetalhe = (playlist?: string): string => (playlist ? `pool ${playlist
 const faixaFonte = (playlist?: string): string =>
   playlist ? `AzuraCast · ${playlist}` : "AzuraCast · fila";
 
+function songPreview(song?: AzSong, dur?: number): LivePreview | undefined {
+  if (!song) return undefined;
+  const lines: string[] = [];
+  if (song.artist) lines.push(`Artista: ${song.artist}`);
+  if (song.title) lines.push(`Título: ${song.title}`);
+  if (song.album) lines.push(`Álbum: ${song.album}`);
+  if (song.genre) lines.push(`Género: ${song.genre}`);
+  if (!lines.length) return undefined;
+  const meta = dur ? fmtDurHelper(dur) : undefined;
+  return { tipo: "texto", corpo: lines.join("\n"), meta };
+}
+
+function fmtDurHelper(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 // now_playing / playing_next (AzSpin) → item de música do alinhamento.
 function spinToItem(spin: AzSpin, id: string): LiveItem {
+  const dur = Math.max(1, Math.round(spin.duration ?? 0));
   return {
     id,
     kind: "musica",
     titulo: songTitle(spin.song),
     detalhe: faixaDetalhe(spin.playlist),
-    duracao: Math.max(1, Math.round(spin.duration ?? 0)),
+    duracao: dur,
     fonte: faixaFonte(spin.playlist),
+    preview: songPreview(spin.song, dur),
   };
 }
 
 // Item da fila do backend (AzQueueItem) → item de música do alinhamento.
 function queueToItem(q: AzQueueItem, idx: number): LiveItem {
+  const dur = Math.max(1, Math.round(q.duration ?? 0));
   return {
     id: `q-${idx}-${q.cued_at ?? q.played_at ?? ""}`,
     kind: "musica",
     titulo: songTitle(q.song),
     detalhe: faixaDetalhe(q.playlist),
-    duracao: Math.max(1, Math.round(q.duration ?? 0)),
+    duracao: dur,
     fonte: faixaFonte(q.playlist),
+    preview: songPreview(q.song, dur),
+  };
+}
+
+// Item do historial (AzSpin passada) → item de música do alinhamento.
+function historyToItem(spin: AzSpin, idx: number): LiveItem {
+  const dur = Math.max(1, Math.round(spin.duration ?? 0));
+  return {
+    id: `h-${idx}-${spin.sh_id ?? spin.played_at ?? ""}`,
+    kind: "musica",
+    titulo: songTitle(spin.song),
+    detalhe: faixaDetalhe(spin.playlist),
+    duracao: dur,
+    fonte: faixaFonte(spin.playlist),
+    preview: songPreview(spin.song, dur),
   };
 }
 
 export async function getLiveData(): Promise<LiveData> {
   const clock = lisbonNow();
+  const todayISO = lisbonDateISO(clock.ms);
 
-  const [np, queue, daily] = await Promise.all([getNowPlaying(), getQueue(), getListenerDaily()]);
+  const [np, queue, daily, history] = await Promise.all([
+    getNowPlaying(),
+    getQueue(),
+    getListenerDaily(),
+    getHistory(todayISO, todayISO),
+  ]);
 
   // Sem nowplaying → não há estado real do ar: cai tudo no MOCK.
   if (!np) return MOCK;
@@ -277,24 +323,47 @@ export async function getLiveData(): Promise<LiveData> {
     aoVivo: np.live?.is_live ?? false,
   };
 
-  // ── itens — faixa atual + fila (ou playing_next se a fila vier vazia).
-  const itens: LiveItem[] = [];
+  // ── itens — historial (passado) + faixa atual + fila (futuro).
   const cur = np.now_playing;
-  if (cur?.song) itens.push(spinToItem(cur, `np-${cur.sh_id ?? "now"}`));
-  if (Array.isArray(queue) && queue.length) {
-    queue.forEach((q, i) => itens.push(queueToItem(q, i)));
-  } else if (np.playing_next?.song) {
-    itens.push(spinToItem(np.playing_next, `np-next-${np.playing_next.sh_id ?? ""}`));
+  const curShId = cur?.sh_id;
+
+  // Historial completo de hoje (mais antigo → mais recente).
+  const allHist: LiveItem[] = [];
+  if (Array.isArray(history) && history.length) {
+    const unique = history
+      .filter((h) => h.sh_id !== curShId)
+      .reverse();
+    unique.forEach((h, i) => allHist.push(historyToItem(h, i)));
   }
 
-  // Nenhum item real (a estação toca sempre algo → isto sinaliza leitura torta):
-  // cai no MOCK para não mostrar um alinhamento vazio.
-  if (itens.length === 0) return MOCK;
+  const futureItens: LiveItem[] = [];
+  if (cur?.song) futureItens.push(spinToItem(cur, `np-${cur.sh_id ?? "now"}`));
+  if (Array.isArray(queue) && queue.length) {
+    queue.forEach((q, i) => futureItens.push(queueToItem(q, i)));
+  } else if (np.playing_next?.song) {
+    futureItens.push(spinToItem(np.playing_next, `np-next-${np.playing_next.sh_id ?? ""}`));
+  }
 
-  // blocoInicio/decorridoInicial = início e "elapsed" da faixa atual. Sem faixa
-  // atual (só fila) → arranca "agora", elapsed 0.
-  const blocoInicio = cur?.played_at ? toLisbonClock(cur.played_at, "s") : clock.clock;
-  const decorridoInicial = cur?.song ? Math.max(0, Math.round(cur.elapsed ?? 0)) : 0;
+  // Nenhum item real → cai no MOCK para não mostrar um alinhamento vazio.
+  if (allHist.length === 0 && futureItens.length === 0) return MOCK;
 
-  return { now, blocoInicio, decorridoInicial, itens };
+  // Default view: only show the 2 most recent history items + current + future.
+  // Full history is available in `historial` for "load more" navigation.
+  const HIST_DEFAULT = 2;
+  const recentHist = allHist.slice(-HIST_DEFAULT);
+
+  const itens = [...recentHist, ...futureItens];
+
+  // blocoInicio / decorridoInicial scoped to the VISIBLE items (recentHist),
+  // not the full history. This keeps the timeline anchored to what's on screen.
+  const visibleHistDur = recentHist.reduce((acc, it) => acc + it.duracao, 0);
+  const curElapsed = cur?.song ? Math.max(0, Math.round(cur.elapsed ?? 0)) : 0;
+  const decorridoInicial = visibleHistDur + curElapsed;
+
+  const blocoInicioSec = Math.max(0, clock.hour * 3600 + clock.minute * 60 - decorridoInicial);
+  const blocoH = Math.floor(blocoInicioSec / 3600) % 24;
+  const blocoM = Math.floor((blocoInicioSec % 3600) / 60);
+  const blocoInicio = `${blocoH.toString().padStart(2, "0")}:${blocoM.toString().padStart(2, "0")}`;
+
+  return { now, blocoInicio, decorridoInicial, itens, historial: allHist, historialVisivel: recentHist.length };
 }

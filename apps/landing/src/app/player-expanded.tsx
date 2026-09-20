@@ -15,7 +15,7 @@ export default function PlayerExpanded({
   closing?: boolean;
   onClose: () => void;
 }) {
-  const { playing, loading, error, now, historico, toggle, volume, muted, setVolume, toggleMute } =
+  const { playing, loading, error, now, historico, toggle, volume, muted, setVolume, toggleMute, ouvintes } =
     usePlayer();
   const silenciado = muted || volume === 0;
   const [copiado, setCopiado] = useState(false);
@@ -80,6 +80,11 @@ export default function PlayerExpanded({
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
               </span>
               No ar agora
+              {ouvintes > 0 ? (
+                <span className="ml-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] tabular-nums normal-case">
+                  {ouvintes} ouvintes
+                </span>
+              ) : null}
             </p>
             <h2 className="mt-2 text-3xl font-semibold leading-tight text-white sm:text-4xl">
               {programaTitulo}

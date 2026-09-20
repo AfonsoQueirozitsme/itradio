@@ -78,6 +78,7 @@ export type Pool = {
   lufs: string; // "−16 LUFS"
   estadoJanela: EstadoJanela; // vs "agora" determinístico (14:20 Lisboa)
   noAr: boolean; // true = pool a substituir a rotação geral agora
+  djMode: boolean; // true = ordered by BPM/key (harmonic mixing), false = shuffle
   ultimaAtualizacao: string; // Lisboa (do `at` mais recente do slug)
   tracks: Track[];
 };
@@ -161,6 +162,7 @@ const POOLS: Pool[] = [
     lufs: "−16 LUFS",
     estadoJanela: "fora-janela",
     noAr: false,
+    djMode: false,
     ultimaAtualizacao: "2026-09-19 00:06",
     tracks: [
       tk("diogo_silva", "hqp3Ftq7bZ0", "Pharrell Williams", "Happy", 233, "2026-09-18T23:05:41Z", "2026-09-19 00:05"),
@@ -190,6 +192,7 @@ const POOLS: Pool[] = [
     lufs: "−16 LUFS",
     estadoJanela: "fora-janela",
     noAr: false,
+    djMode: true,
     ultimaAtualizacao: "2026-09-19 00:11",
     tracks: [
       tk("sofia_martins", "Fr3dAg1nDlh", "Fred again..", "Delilah (pull me out of this)", 214, "2026-09-18T23:11:02Z", "2026-09-19 00:11", "falhou", "ytmusicapi → yt-dlp"),
@@ -219,6 +222,7 @@ const POOLS: Pool[] = [
     lufs: "−16 LUFS",
     estadoJanela: "fora-janela",
     noAr: false,
+    djMode: false,
     ultimaAtualizacao: "2026-09-19 00:15",
     tracks: [
       tk("tuga_underground", "o8yq_YDQWM8", "Deakon", "Dealema - A Cena Toda", 244, "2026-09-18T23:14:41Z", "2026-09-19 00:14", "normalizado", "ytmusicapi → yt-dlp"),
@@ -247,6 +251,7 @@ const POOLS: Pool[] = [
     lufs: "−16 LUFS",
     estadoJanela: "em-janela",
     noAr: true,
+    djMode: false,
     ultimaAtualizacao: "2026-09-19 00:19",
     tracks: [
       tk("tomas_rocha", "Ph03bR1dgrs", "Phoebe Bridgers", "I Can't Wait", 189, "2026-09-18T23:18:41Z", "2026-09-19 00:18", "pendente"),
@@ -276,6 +281,7 @@ const POOLS: Pool[] = [
     lufs: "−16 LUFS",
     estadoJanela: "fora-janela",
     noAr: false,
+    djMode: true,
     ultimaAtualizacao: "2026-09-19 00:24",
     tracks: [
       tk("beatriz_lima", "Km1dLHmbl3E", "Kendrick Lamar", "HUMBLE.", 177, "2026-09-18T23:23:41Z", "2026-09-19 00:23"),
@@ -305,6 +311,7 @@ const POOLS: Pool[] = [
     lufs: "−16 LUFS",
     estadoJanela: "fora-janela",
     noAr: false,
+    djMode: true,
     ultimaAtualizacao: "2026-09-19 00:28",
     tracks: [
       tk("goncalo_pires", "Sd0HangOn2u", "Sade", "Hang On to Your Love", 262, "2026-09-18T23:27:41Z", "2026-09-19 00:27", "falhou"),

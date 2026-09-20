@@ -194,6 +194,14 @@ export function getPlaylists(): Promise<AzPlaylist[] | null> {
   return azGet<AzPlaylist[]>(`/api/station/${AZ_STATION_ID}/playlists`);
 }
 
+export function getHistory(startISO?: string, endISO?: string): Promise<AzSpin[] | null> {
+  const params: string[] = [];
+  if (startISO) params.push(`start=${startISO}`);
+  if (endISO) params.push(`end=${endISO}`);
+  const qs = params.length ? `?${params.join("&")}` : "";
+  return azGet<AzSpin[]>(`/api/station/${AZ_STATION_ID}/history${qs}`);
+}
+
 // Normaliza um nome de playlist para casar de forma robusta com o AzuraCast:
 // sem acentos, minúsculas, espaços colapsados. "Música Boot Matinal" casa com
 // "musica  boot matinal". (Os nomes reais devem ser iguais aos do deployer, mas
@@ -516,7 +524,7 @@ export function lisbonDateISO(input?: number | string | Date, unit: "s" | "ms" =
 // meio-dia (não à meia-noite) garante que somar N·24 h em ms nunca cruza um limite
 // de dia por engano → imune ao DST de Lisboa (dias de 23 h/25 h nas mudanças de
 // hora). Usar isto em vez de `now.ms + 86_400_000` para saltar de dia de calendário.
-function addDaysISO(iso: string, days: number): string {
+export function addDaysISO(iso: string, days: number): string {
   const [y, m, d] = iso.split("-").map(Number);
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return iso;
   const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0) + days * 86_400_000);
@@ -560,6 +568,6 @@ export function fmtDuration(sec: number): string {
   return `${Math.floor(s / 60)}:${pad2(s % 60)}`;
 }
 
-function pad2(n: number): string {
+export function pad2(n: number): string {
   return n.toString().padStart(2, "0");
 }

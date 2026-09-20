@@ -12,7 +12,7 @@
 // como nas páginas Jobs/Live. Voice IDs NUNCA aparecem por inteiro. A "vida" é
 // simulada no cliente a partir de constantes do seam (sem mismatch de hidratação).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StatusChip } from "./ui";
 import { IconClock, IconClose, IconPlay, IconRefresh, IconAlert, IconCheck, IconBell } from "./icons";
 import type { Locutor, LocutorEstado, LocutoresData, QuotaEL } from "../../_lib/locutores";
@@ -208,27 +208,48 @@ function LocutorCard({ l, onOpen }: { l: Locutor; onOpen: () => void }) {
   );
 }
 
-// ── Sample simulado (play/pause + barra, sem áudio real) ────────────────────
+// ── Sample player (real audio via proxy when ficheiro exists) ────────────────
 function SamplePlayer({ l }: { l: Locutor }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [prog, setProg] = useState(0); // 0..100
   const [regNota, setRegNota] = useState(false);
+  const hasFile = !!l.sample.ficheiro;
 
-  // avança de forma a que a reprodução completa dure ~sample.dur segundos
+  function togglePlay() {
+    if (hasFile) {
+      // real audio via proxy
+      if (!audioRef.current) {
+        audioRef.current = new Audio(`/api/gestao/audio?path=${encodeURIComponent(l.sample.ficheiro!)}`);
+        audioRef.current.addEventListener("timeupdate", () => {
+          const a = audioRef.current;
+          if (a && a.duration) setProg((a.currentTime / a.duration) * 100);
+        });
+        audioRef.current.addEventListener("ended", () => { setPlaying(false); setProg(0); });
+      }
+      if (playing) { audioRef.current.pause(); setPlaying(false); }
+      else { audioRef.current.play(); setPlaying(true); }
+    } else {
+      // fallback: simulated (no file)
+      if (!playing && prog >= 100) setProg(0);
+      setPlaying((v) => !v);
+    }
+  }
+
+  // simulated timer fallback (only when no ficheiro)
   useEffect(() => {
-    if (!playing) return;
-    const step = 100 / (l.sample.dur * 10); // tick a cada 100ms
+    if (hasFile || !playing) return;
+    const step = 100 / (l.sample.dur * 10);
     const id = setInterval(() => {
       setProg((v) => {
-        if (v >= 100) {
-          setPlaying(false);
-          return 100;
-        }
+        if (v >= 100) { setPlaying(false); return 100; }
         return Math.min(100, v + step);
       });
     }, 100);
     return () => clearInterval(id);
-  }, [playing, l.sample.dur]);
+  }, [playing, l.sample.dur, hasFile]);
+
+  useEffect(() => () => { audioRef.current?.pause(); audioRef.current = null; }, []);
 
   const elapsed = (prog / 100) * l.sample.dur;
   const custoSample = Math.round(l.sample.texto.length * credPorCar(l.modelo));
@@ -238,17 +259,14 @@ function SamplePlayer({ l }: { l: Locutor }) {
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--gray)]">Sample de voz</span>
         <span className="rounded-full bg-[var(--card)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--gray)]">
-          sample simulado
+          {hasFile ? "sample" : "sample simulado"}
         </span>
       </div>
 
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => {
-            if (!playing && prog >= 100) setProg(0);
-            setPlaying((v) => !v);
-          }}
+          onClick={togglePlay}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--ink)] text-white transition-transform hover:scale-105"
           aria-label={playing ? "Pausar" : "Reproduzir"}
         >

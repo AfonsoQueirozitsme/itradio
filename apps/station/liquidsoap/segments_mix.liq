@@ -44,6 +44,87 @@ end
 dur_transito = safe_dur("#{MEDIA}/segmentos/transito.mp3")
 dur_meteo    = safe_dur("#{MEDIA}/segmentos/meteo.mp3")
 
+# ============================================================================
+# DJ-MODE — Smart Crossfade (Layer 2)
+# ----------------------------------------------------------------------------
+# Applies intelligent crossfading between music tracks using the cross()
+# operator. This wraps AzuraCast's `radio` source BEFORE segment injection,
+# so segments still duck over the (now crossfaded) music stream.
+#
+# How it works:
+#   1. cross() holds the last N seconds of the outgoing track and the first
+#      N seconds of the incoming track, then calls our transition function.
+#   2. The callback reads per-track BPM metadata and adjusts the blend:
+#        - Similar BPM (diff < 10) → long 8s overlap, smooth sinusoidal mix
+#        - Moderate diff (10-30)   → standard 6s overlap
+#        - Large diff (> 30)       → short 4s transition
+#        - No BPM metadata         → default duration (cross_def_dur ref)
+#   3. During the overlap, frequency filters prevent "mud":
+#        - Outgoing track → low-pass at 6 kHz (clears competing highs)
+#        - Incoming track → high-pass at 150 Hz (avoids bass buildup)
+#        - Both tracks use sinusoidal volume curves for smooth perception
+#   4. Segment/news injection is unaffected: fire() and fire_news() control
+#      music_vol / seg_gain / bed_vol refs which sit AFTER the crossfade.
+#
+# Tuneable parameters (change and redeploy, or adjust via Liquidsoap telnet):
+#   cross_max_dur  — maximum overlap window in seconds (default 8.0)
+#   cross_def_dur  — default fade when no BPM info (ref, default 6.0)
+#   cross_lpf_freq — low-pass cutoff on outgoing track in Hz (default 6000.)
+#   cross_hpf_freq — high-pass cutoff on incoming track in Hz (default 150.)
+#
+# FALLBACK: If DJ crossfade causes startup issues, comment out the single
+# line `radio = cross(...)` below. AzuraCast's default transitions will be
+# used instead and everything else (segments, news, ducking) keeps working.
+# ============================================================================
+
+cross_max_dur  = 8.0
+cross_def_dur  = ref(6.0)
+cross_lpf_freq = 6000.
+cross_hpf_freq = 150.
+
+def dj_crossfade(a, b) =
+  # Read BPM from track metadata (set by AzuraCast tags or music-build).
+  old_bpm_s = list.assoc(default="0", "bpm", a.metadata)
+  new_bpm_s = list.assoc(default="0", "bpm", b.metadata)
+  old_bpm   = float_of_string(default=0., old_bpm_s)
+  new_bpm   = float_of_string(default=0., new_bpm_s)
+
+  # Absolute BPM difference — determines transition length.
+  raw_diff = old_bpm - new_bpm
+  bpm_diff = if raw_diff < 0. then 0. - raw_diff else raw_diff end
+
+  fade_dur =
+    if old_bpm > 1. and new_bpm > 1. then
+      # Both tracks have BPM info — scale overlap by proximity.
+      if bpm_diff < 10. then 8.       # very close BPM → long smooth blend
+      elsif bpm_diff < 30. then 6.    # moderate gap   → standard blend
+      else 4.                          # big gap        → short transition
+      end
+    else
+      # No BPM metadata — fall back to configurable default.
+      cross_def_dur()
+    end
+
+  log.info(label="itfm_dj",
+    "crossfade: BPM #{old_bpm_s}->#{new_bpm_s} diff=#{bpm_diff} fade=#{fade_dur}s")
+
+  # Outgoing track: sinusoidal fade-out + low-pass to clear competing highs.
+  a_out = fade.out(duration=fade_dur, type="sin", a.source)
+  a_out = filter.iir.butterworth.low(frequency=cross_lpf_freq, order=2, a_out)
+
+  # Incoming track: sinusoidal fade-in + high-pass to prevent bass mud.
+  b_in = fade.in(duration=fade_dur, type="sin", b.source)
+  b_in = filter.iir.butterworth.high(frequency=cross_hpf_freq, order=2, b_in)
+
+  # Mix both streams during the overlap.
+  add(normalize=false, [a_out, b_in])
+end
+
+# Apply DJ crossfade to the music stream. cross() detects track boundaries
+# in AzuraCast's `radio` source and calls our transition function.
+# Segments/news are injected AFTER this, so they are unaffected.
+radio = cross(duration=cross_max_dur, dj_crossfade, radio)
+
 # --- Filas e volumes controláveis ao vivo -----------------------------------
 seg_q = request.queue(id="itfm_seg_queue")
 bed_q = request.queue(id="itfm_bed_queue")
