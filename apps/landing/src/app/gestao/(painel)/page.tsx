@@ -1,113 +1,112 @@
-import { currentOperator } from "../_lib/auth";
+import { getPainelData } from "../_lib/painel";
+import { Card, CardHeader, PageHeader, Stat, StatusChip } from "./_components/ui";
+import { BarChart, RadialGauge, Sparkline, PoolBar } from "./_components/charts";
+import RangeToggle from "./_components/range-toggle";
+import { IconClock } from "./_components/icons";
 
-type Estado = "ativo" | "breve";
-
-const FASES: { fase: string; titulo: string; desc: string; estado: Estado }[] = [
-  {
-    fase: "Fase 0",
-    titulo: "Fundações + acesso",
-    desc: "Sessão partilhada com o painel (SSO), estrutura do CMS e este painel.",
-    estado: "ativo",
-  },
-  {
-    fase: "Fase 1",
-    titulo: "Programas + grelha do site",
-    desc: "Criar e editar programas; a grelha do site passa a ler daqui.",
-    estado: "breve",
-  },
-  {
-    fase: "Fase 2",
-    titulo: "Locutores + fotos",
-    desc: "Criar locutores e carregar imagens (guardadas fora do git).",
-    estado: "breve",
-  },
-  {
-    fase: "Fase 3",
-    titulo: "Segmentos & notícias",
-    desc: "Horas de trânsito, meteo e notícias :00/:30. Pré-visualizar e aplicar.",
-    estado: "breve",
-  },
-  {
-    fase: "Fase 4",
-    titulo: "Janelas de música",
-    desc: "Quando cada pool toca no ar, sem tocar nas primitivas destrutivas.",
-    estado: "breve",
-  },
-  {
-    fase: "Fase 5",
-    titulo: "Estilos de música",
-    desc: "Que géneros cada programa saca; reconstruir agora (job assíncrono).",
-    estado: "breve",
-  },
-];
+const PROX_TONE = {
+  noticias: "ok",
+  programa: "neutral",
+  segmento: "warn",
+} as const;
 
 export default async function PainelPage() {
-  const op = await currentOperator();
-  const nome = op?.name || op?.email || "";
+  const d = await getPainelData();
 
   return (
-    <div className="space-y-8">
-      <section>
-        <h1 className="text-2xl font-semibold text-slate-900">
-          Olá{nome ? `, ${nome.split(" ")[0]}` : ""} 👋
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Painel de gestão da rádio. Vai crescendo por fases — cada uma entra sem
-          risco para a emissão no ar.
-        </p>
-      </section>
+    <div className="space-y-4">
+      <PageHeader crumb="Painel" title="Painel" action={<RangeToggle />} />
 
-      <section>
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Roadmap
-        </h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {FASES.map((f) => (
+      {/* KPIs */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Ouvintes agora" value={d.ouvintesAgora.value} delta={d.ouvintesAgora.delta}>
+          <Sparkline data={d.ouvintesAgora.spark} />
+        </Stat>
+
+        <Card className="p-4">
+          <StatusChip tone="live" dot>
+            No ar
+          </StatusChip>
+          <div className="mt-2 font-[family-name:var(--font-logo)] text-[19px] font-semibold text-[var(--ink)]">
+            {d.noAr.programa}
+          </div>
+          <div className="mt-0.5 text-xs text-[var(--gray)]">
+            {d.noAr.locutor} · até {d.noAr.ate}
+          </div>
+        </Card>
+
+        <Stat label="Ocupação da grelha" value={d.ocupacaoGrelha.pct} unit="%">
+          <div className="h-1.5 overflow-hidden rounded-full bg-[var(--bg)]">
             <div
-              key={f.fase}
-              className={
-                f.estado === "ativo"
-                  ? "rounded-2xl border border-brand/30 bg-white p-4 shadow-sm ring-1 ring-brand/10"
-                  : "rounded-2xl border border-slate-200 bg-white p-4"
-              }
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                  {f.fase}
-                </span>
-                {f.estado === "ativo" ? (
-                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-700">
-                    ativo
-                  </span>
-                ) : (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                    em breve
-                  </span>
-                )}
-              </div>
-              <h3 className="mt-1 font-semibold text-slate-900">{f.titulo}</h3>
-              <p className="mt-1 text-sm text-slate-500">{f.desc}</p>
-            </div>
+              className="h-full rounded-full bg-[var(--ink)]"
+              style={{ width: `${d.ocupacaoGrelha.pct}%` }}
+            />
+          </div>
+        </Stat>
+
+        <Card className="p-4">
+          <div className="text-xs text-[var(--gray)]">Próximo segmento</div>
+          <div className="mt-2 font-[family-name:var(--font-logo)] text-[19px] font-semibold text-[var(--ink)]">
+            {d.proximoSegmento.tipo}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1 text-xs text-[var(--gray)]">
+            <IconClock className="h-3.5 w-3.5" />
+            {d.proximoSegmento.hora} · em {d.proximoSegmento.emMin} min
+          </div>
+        </Card>
+      </div>
+
+      {/* Gráfico + medidor */}
+      <div className="grid gap-3 lg:grid-cols-[1.7fr_1fr]">
+        <Card className="p-4">
+          <CardHeader title="Ouvintes hoje" hint={`pico ${d.ouvintesHoje.picoHora} · ${d.ouvintesHoje.picoLabel}`} />
+          <div className="mt-2">
+            <BarChart
+              data={d.ouvintesHoje.serie}
+              peakIndex={d.ouvintesHoje.picoIndex}
+              peakLabel={d.ouvintesHoje.picoLabel}
+            />
+          </div>
+        </Card>
+
+        <Card className="flex flex-col items-center p-4">
+          <div className="w-full">
+            <CardHeader title="Ocupação da grelha" />
+          </div>
+          <div className="flex flex-1 items-center">
+            <RadialGauge
+              value={d.ocupacaoGrelha.pct}
+              caption={`${d.ocupacaoGrelha.horasCobertas} de ${d.ocupacaoGrelha.totalHoras} h`}
+            />
+          </div>
+        </Card>
+      </div>
+
+      {/* Pools de música */}
+      <Card className="p-4">
+        <CardHeader title="Estado dos pools de música" hint="atualizado há 3 h" />
+        <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {d.pools.map((p) => (
+            <PoolBar key={p.label} label={p.label} value={p.value} cap={p.cap} />
           ))}
         </div>
-      </section>
+      </Card>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600">
-        <h2 className="mb-2 font-semibold text-slate-900">Como funciona o acesso</h2>
-        <ul className="list-disc space-y-1 pl-5">
-          <li>
-            O acesso é a tua sessão do painel IT.FM — sem palavra-passe separada.
-          </li>
-          <li>
-            As alterações à estação são feitas por um serviço dedicado com chave
-            própria; a tua sessão só autoriza a entrada.
-          </li>
-          <li>
-            Operações destrutivas (apagar ficheiros, limpar programação) nunca
-            estão disponíveis por aqui.
-          </li>
+      {/* Próximos na grelha */}
+      <Card className="p-4">
+        <CardHeader title="Próximos na grelha" />
+        <ul className="mt-2 divide-y divide-[var(--line)]">
+          {d.proximos.map((p, i) => (
+            <li key={i} className="flex items-center gap-3 py-2.5">
+              <span className="font-[family-name:var(--font-logo)] text-sm font-semibold tabular-nums text-[var(--ink)]">
+                {p.hora}
+              </span>
+              <span className="flex-1 text-sm text-[var(--ink)]">{p.titulo}</span>
+              <StatusChip tone={PROX_TONE[p.tipo]}>{p.tipo}</StatusChip>
+            </li>
+          ))}
         </ul>
-      </section>
+      </Card>
     </div>
   );
 }

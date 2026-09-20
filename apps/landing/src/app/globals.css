@@ -96,6 +96,27 @@ body {
   background-attachment: fixed;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Gestão (/gestao) — tema próprio, isolado por scope.
+   Aditivo e SEM efeito no site público: nada fora de .gestao usa estas classes.
+   Como o @theme inline gera `.bg-brand{background:var(--brand)}` (valor resolvido
+   no ponto de uso), redefinir --brand aqui recolore TODOS os utilitários brand
+   já existentes (login, nav, cartões) para o verde Ledgerix — sem editar nada.
+   Os restantes tokens usam-se via valores arbitrários: bg-[var(--card)],
+   text-[var(--ink)], border-[var(--line)], text-[var(--gray)], bg-[var(--bg)]. */
+.gestao {
+  --brand: #75fb90; /* accent verde Ledgerix (só neste scope) */
+  --brand-dark: #4fd873; /* hover/pressed do accent */
+  --ink: #0a0a0a; /* texto primário / preenchimentos ativos */
+  --gray: #8f8e91; /* texto secundário */
+  --line: #e3e2e5; /* bordas / divisórias */
+  --card: #ffffff; /* superfície dos cartões */
+  --bg: #f4f4f5; /* fundo da página */
+
+  color: var(--ink);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
 /* Acessibilidade: respeita "reduzir movimento" do SO (WCAG 2.2.2).
    Neutraliza os loops infinitos (ping do "no ar agora", equalizador) e as
    animações de entrada, sem alterar o visual para quem não optou por isso. */

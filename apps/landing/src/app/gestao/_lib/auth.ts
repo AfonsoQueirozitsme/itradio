@@ -9,7 +9,12 @@
 import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { AZURACAST_BASE_URL, GESTAO_ADMIN_GATE, AZ_PROBE_TIMEOUT_MS } from "./config";
+import {
+  AZURACAST_BASE_URL,
+  GESTAO_ADMIN_GATE,
+  AZ_PROBE_TIMEOUT_MS,
+  GESTAO_DEV_BYPASS,
+} from "./config";
 
 export type Operator = {
   id: number | string;
@@ -70,6 +75,13 @@ export async function operatorFromCookie(cookie: string | null): Promise<Operato
 // pedido via next/headers. Memoizado por pedido com React cache() — layout e
 // página partilham uma só sondagem ao AzuraCast por render.
 export const currentOperator = cache(async (): Promise<Operator | null> => {
+  // DEV-ONLY (ver config.ts): sem AzuraCast local, devolve um operador fictício
+  // para a UI renderizar. Cadeado duplo garantido no config; aqui é o único
+  // ponto por onde tudo passa (guard, páginas, route handler), sem ler cookie.
+  if (GESTAO_DEV_BYPASS) {
+    return { id: "dev", name: "Dev Operator", email: "dev@local", roles: [] };
+  }
+
   const cookie = (await headers()).get("cookie");
   return operatorFromCookie(cookie);
 });
