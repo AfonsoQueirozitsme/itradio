@@ -384,9 +384,11 @@ export async function getMusicaData(): Promise<MusicaData> {
       if (bestIso) ultimaAtualizacao = toLisbonStamp(bestIso);
     }
 
-    // tracks — do manifest (presença no manifest === normalizado); sem array de
-    // paths (manifest ausente/sem slug) → degrade para P.tracks.
-    let tracks = P.tracks;
+    // tracks — do manifest (presença no manifest === normalizado). COERENTE com
+    // `faixas`: manifest lido com sucesso mas SEM este slug → [] (vazio real); só
+    // degrada para P.tracks quando o manifest FALHOU. (Senão o cabeçalho mostrava
+    // "0 / 60" ao lado das 7 faixas mock — o ecrã contradizia-se a si próprio.)
+    let tracks: Track[];
     const paths = manifest?.music?.[P.slug];
     if (Array.isArray(paths)) {
       tracks = paths.map((path): Track => {
@@ -406,9 +408,12 @@ export async function getMusicaData(): Promise<MusicaData> {
           estado: "normalizado",
           path,
           addedAt,
-          addedAtLabel: addedAt ? toLisbonStamp(addedAt) : P.ultimaAtualizacao,
+          // data corrompida/ausente → cai no carimbo de P (nunca 500 → regra de ouro).
+          addedAtLabel: Number.isFinite(Date.parse(addedAt)) ? toLisbonStamp(addedAt) : P.ultimaAtualizacao,
         };
       });
+    } else {
+      tracks = manifest ? [] : P.tracks;
     }
 
     return { ...P, faixas, noAr, estadoJanela, ultimaAtualizacao, tracks };
@@ -419,17 +424,20 @@ export async function getMusicaData(): Promise<MusicaData> {
     ? POOLS.reduce((acc, P) => acc + (manifest.music?.[P.slug]?.length ?? 0), 0)
     : MOCK.kpis.faixasTotais;
 
+  // updatedAt do manifest só alimenta os carimbos se for uma data PARSEÁVEL; data
+  // corrompida (string não-vazia inválida) → degrade para o MOCK, nunca um 500.
+  // (toLisbonStamp atirava RangeError numa data inválida → getMusicaData rejeitava
+  // → /gestao/musica 500, sem error boundary. Regra de ouro: dados nunca fazem 500.)
+  const updatedAt = manifest?.updatedAt ?? "";
+  const updatedAtOk = Number.isFinite(Date.parse(updatedAt));
+
   const kpis: MusicaKpis = {
     faixasTotais,
     pools: MOCK.kpis.pools, // 6 (estático)
     lufsAlvo: MOCK.kpis.lufsAlvo, // estático
     encode: MOCK.kpis.encode, // estático
-    ultimaAtualizacao: manifest?.updatedAt
-      ? toLisbonStamp(manifest.updatedAt)
-      : MOCK.kpis.ultimaAtualizacao,
-    ultimaAtualizacaoRel: manifest?.updatedAt
-      ? relativeFromNow(manifest.updatedAt)
-      : MOCK.kpis.ultimaAtualizacaoRel,
+    ultimaAtualizacao: updatedAtOk ? toLisbonStamp(updatedAt) : MOCK.kpis.ultimaAtualizacao,
+    ultimaAtualizacaoRel: updatedAtOk ? relativeFromNow(updatedAt) : MOCK.kpis.ultimaAtualizacaoRel,
     proximoRebuild: proximaOcorrenciaDiariaStamp(5, 0), // próximo 05:00 Lisboa
     proximoRebuildFonte: MOCK.kpis.proximoRebuildFonte, // estático
   };

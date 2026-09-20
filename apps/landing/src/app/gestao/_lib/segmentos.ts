@@ -280,12 +280,16 @@ export async function getSegmentosData(): Promise<SegmentosData> {
 
   let injector = MOCK.injector;
   if (newest) {
-    // tamanho REAL do custom_config aplicado; se a leitura falhar, cai no mock.
-    const raw = await readStationFile(`build/${newest.name}`);
+    // O backup é escrito ANTES do PUT+restart (deploy-segments.mjs) → o seu MTIME
+    // marca o último apply (→ ultimoRestart, correto), mas o seu CONTEÚDO é a config
+    // ANTERIOR. Para o tamanho, lemos a FONTE do injetor (liquidsoap/segments_mix.liq
+    // — a lógica que é aplicada; difere da config final só pela substituição de
+    // {{MEDIA_DIR}}). Leitura falha → cai no mock.
+    const src = await readStationFile("liquidsoap/segments_mix.liq");
     injector = {
       ativo: true, // houve deploy do injetor (não probamos o estado on-air do backend).
       ultimoRestart: relativeFromNow(newest.mtimeMs), // mtime do backup = último apply.
-      customConfigChars: raw?.length ?? MOCK.injector.customConfigChars,
+      customConfigChars: src?.length ?? MOCK.injector.customConfigChars,
     };
   }
 

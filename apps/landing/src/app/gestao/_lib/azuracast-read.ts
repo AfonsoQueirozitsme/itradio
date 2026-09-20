@@ -428,6 +428,8 @@ export function lisbonNow(at?: Date | number): LisbonClock {
 }
 
 // "HH:MM" de Lisboa a partir de um epoch (s ou ms) ou ISO/Date.
+// Data inválida (string não parseável, etc.) → "" (NUNCA atira → regra de ouro:
+// nenhum campo derivado deste helper pode deitar um seam abaixo com um 500).
 export function toLisbonClock(input: number | string | Date, unit: "s" | "ms" = "ms"): string {
   const d =
     typeof input === "number"
@@ -435,11 +437,13 @@ export function toLisbonClock(input: number | string | Date, unit: "s" | "ms" = 
       : typeof input === "string"
         ? new Date(input)
         : input;
+  if (Number.isNaN(d.getTime())) return "";
   const { hour, minute } = lisbonParts(d);
   return `${pad2(hour)}:${pad2(minute)}`;
 }
 
 // "YYYY-MM-DD HH:MM" de Lisboa (para "última atualização" legível).
+// Data inválida → "" (NUNCA atira — ver toLisbonClock).
 export function toLisbonStamp(input: number | string | Date, unit: "s" | "ms" = "ms"): string {
   const d =
     typeof input === "number"
@@ -447,6 +451,7 @@ export function toLisbonStamp(input: number | string | Date, unit: "s" | "ms" = 
       : typeof input === "string"
         ? new Date(input)
         : input;
+  if (Number.isNaN(d.getTime())) return "";
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: LISBON_TZ,
     year: "numeric",
@@ -472,6 +477,7 @@ export function lisbonDateISO(input?: number | string | Date, unit: "s" | "ms" =
         : typeof input === "string"
           ? new Date(input)
           : input;
+  if (Number.isNaN(d.getTime())) return "";
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: LISBON_TZ,
     year: "numeric",
@@ -482,14 +488,27 @@ export function lisbonDateISO(input?: number | string | Date, unit: "s" | "ms" =
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
+// Avança `days` numa data "YYYY-MM-DD" via aritmética UTC ao MEIO-DIA. Ancorar ao
+// meio-dia (não à meia-noite) garante que somar N·24 h em ms nunca cruza um limite
+// de dia por engano → imune ao DST de Lisboa (dias de 23 h/25 h nas mudanças de
+// hora). Usar isto em vez de `now.ms + 86_400_000` para saltar de dia de calendário.
+function addDaysISO(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return iso;
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0) + days * 86_400_000);
+  return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+}
+
 // Carimbo "YYYY-MM-DD HH:MM" (Lisboa) da PRÓXIMA ocorrência de uma hora diária
 // (ex.: 05:00 do refresh de música). Se já passou hoje → amanhã. Determinístico
-// a partir do relógio de Lisboa ancorado no servidor.
+// a partir do relógio de Lisboa ancorado no servidor. O salto para "amanhã" é feito
+// no dia de CALENDÁRIO (addDaysISO), não somando 24 h em ms → correto no DST.
 export function proximaOcorrenciaDiariaStamp(hour: number, minute = 0): string {
   const now = lisbonNow();
   const alvoMin = hour * 60 + minute;
-  const baseMs = now.minutesOfDay < alvoMin ? now.ms : now.ms + 86_400_000;
-  return `${lisbonDateISO(baseMs)} ${pad2(hour)}:${pad2(minute)}`;
+  const hoje = lisbonDateISO(now.ms);
+  const dia = now.minutesOfDay < alvoMin ? hoje : addDaysISO(hoje, 1);
+  return `${dia} ${pad2(hour)}:${pad2(minute)}`;
 }
 
 // "há 20 h" / "há 5 min" / "agora mesmo" a partir de um instante passado.

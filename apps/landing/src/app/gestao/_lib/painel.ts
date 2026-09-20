@@ -8,7 +8,8 @@
 //                   diária (reports/overview/charts) para spark/delta.
 //   noAr          → grelha (Lisboa vs janelas) — sempre disponível, não faz I/O.
 //   ocupacaoGrelha→ grelha estática (soma das janelas dos 6 programas / 24 h).
-//   proximoSegmento→ próximo boletim de notícias :30 (news-live.mjs: :30, 07–22).
+//   proximoSegmento→ próximo segmento do injetor (segments_mix.liq via _lib/
+//                   segmentos.ts): trânsito/meteo/notícias — alinhado com Segmentos.
 //   ouvintesHoje  → série diária de ouvintes (charts.daily). Real-a-zero honesto.
 //   pools         → build-music/manifest.json (nº de faixas por slug) + poolCap.
 //   proximos      → grelha (próximos arranques) + próximo boletim :30.
@@ -76,21 +77,48 @@ function ocupacaoGrelhaEstatica(): PainelData["ocupacaoGrelha"] {
   };
 }
 
-// Notícias ao vivo: :30, de hora a hora, das 07:30 às 22:30 (news-live.mjs).
-const NEWS_MIN = 30;
-const NEWS_FIRST_H = 7;
-const NEWS_LAST_H = 22;
+// Agendador do INJETOR (espelho do apps/station/liquidsoap/segments_mix.liq; ver o
+// mapa hora→conteúdo em _lib/segmentos.ts): trânsito :30 em 07·09, meteo :30 em
+// 08·11·15, notícias :30 em 10·12·13·14·16–23 + notícias :00 às 19h (hora nobre).
+// É o MESMO conjunto de slots que o ecrã Segmentos usa para o seu `proximo` → o
+// "próximo segmento" do Painel nunca contradiz o dos Segmentos.
+type SegAt = { minuto: 0 | 30; horas: number[]; tipo: string };
+const SEG_INJETOR: SegAt[] = [
+  { minuto: 30, horas: [7, 9], tipo: "Trânsito" },
+  { minuto: 30, horas: [8, 11, 15], tipo: "Meteo" },
+  { minuto: 30, horas: [10, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23], tipo: "Notícias" },
+  { minuto: 0, horas: [19], tipo: "Notícias" },
+];
 
-// Próximo boletim de notícias a partir do relógio de Lisboa. Dá a volta ao dia.
-function proximoBoletim(clock: LisbonClock): PainelData["proximoSegmento"] {
+// Só as horas :30 de NOTÍCIAS (para a lista "Próximos", cujo rótulo é "Notícias :30").
+const NOTICIAS_30_HORAS = [10, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23];
+
+// Próximo SEGMENTO do injetor (qualquer tipo) a partir do relógio de Lisboa. O
+// `tipo` é o real do slot (Meteo/Trânsito/Notícias), não "Notícias" fixo. Dá a
+// volta ao dia. Determinístico (só depende de nowMin e do mapa BAKED).
+function proximoSegmento(clock: LisbonClock): PainelData["proximoSegmento"] {
   const nowMin = clock.minutesOfDay;
-  for (let h = NEWS_FIRST_H; h <= NEWS_LAST_H; h++) {
-    const t = h * 60 + NEWS_MIN;
-    if (t > nowMin) return { tipo: "Notícias", hora: `${pad2(h)}:30`, emMin: t - nowMin };
+  type Cand = { min: number; hora: number; minuto: number; tipo: string };
+  const cands: Cand[] = [];
+  for (const s of SEG_INJETOR)
+    for (const h of s.horas) cands.push({ min: h * 60 + s.minuto, hora: h, minuto: s.minuto, tipo: s.tipo });
+  const futuros = cands.filter((c) => c.min > nowMin).sort((a, b) => a.min - b.min);
+  const c = futuros[0] ?? cands.slice().sort((a, b) => a.min - b.min)[0];
+  const emMin = c.min > nowMin ? c.min - nowMin : 24 * 60 - nowMin + c.min;
+  return { tipo: c.tipo, hora: `${pad2(c.hora)}:${pad2(c.minuto)}`, emMin };
+}
+
+// Próximo BOLETIM DE NOTÍCIAS :30 (para a lista "Próximos"). Só slots :30 de
+// notícias; dá a volta ao dia. (O topo-da-hora das 19h fica de fora — aqui o
+// rótulo é ":30".)
+function proximaNoticia(clock: LisbonClock): { hora: string; emMin: number } {
+  const nowMin = clock.minutesOfDay;
+  for (const h of NOTICIAS_30_HORAS) {
+    const t = h * 60 + 30;
+    if (t > nowMin) return { hora: `${pad2(h)}:30`, emMin: t - nowMin };
   }
-  // já passaram todos hoje → primeiro de amanhã (07:30)
-  const t = NEWS_FIRST_H * 60 + NEWS_MIN;
-  return { tipo: "Notícias", hora: "07:30", emMin: 24 * 60 - nowMin + t };
+  const t0 = NOTICIAS_30_HORAS[0] * 60 + 30;
+  return { hora: `${pad2(NOTICIAS_30_HORAS[0])}:30`, emMin: 24 * 60 - nowMin + t0 };
 }
 
 // Próximas entradas da grelha: arranques dos programas (+ madrugada às 23:00) e o
@@ -110,8 +138,8 @@ function proximosDaGrelha(clock: LisbonClock): PainelData["proximos"] {
     }
   }
   eventos.push({ min: hhmmToMin(2300), hora: "23:00", titulo: "Madrugada · Rotação geral", tipo: "programa" });
-  const bol = proximoBoletim(clock);
-  eventos.push({ min: hhmmToMin(Number(bol.hora.replace(":", ""))), hora: bol.hora, titulo: "Notícias :30", tipo: "noticias" });
+  const noticia = proximaNoticia(clock);
+  eventos.push({ min: hhmmToMin(Number(noticia.hora.replace(":", ""))), hora: noticia.hora, titulo: "Notícias :30", tipo: "noticias" });
 
   return eventos
     .map((e) => ({ ...e, sortKey: e.min > nowMin ? e.min : e.min + 24 * 60 }))
@@ -171,7 +199,7 @@ export async function getPainelData(): Promise<PainelData> {
     ouvintesAgora,
     noAr: { programa, locutor, ate },
     ocupacaoGrelha: ocupacaoGrelhaEstatica(),
-    proximoSegmento: proximoBoletim(clock),
+    proximoSegmento: proximoSegmento(clock),
     ouvintesHoje,
     pools,
     proximos: proximosDaGrelha(clock),
