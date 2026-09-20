@@ -3,11 +3,11 @@
 // Biblioteca de música por programa. Uma pool por programa (6), cada uma com a
 // sua playlist AzuraCast "Música <nome>" que substitui a rotação geral só dentro
 // da janela de Lisboa. Lista clicável → drawer com as faixas (recência desc) e o
-// botão "Reconstruir agora" (build → deploy). Dados mock via seam _lib/musica.ts.
-// Tudo é SIMULADO: a pré-visualização de faixa e o "Reconstruir agora" não fazem
-// pedidos — mostram estado local (como as páginas Jobs/Live). Segredos/.env nunca
-// aparecem aqui. Valores de "em janela / no ar" vêm determinísticos do seam (agora
-// = 14:20 Lisboa) → sem mismatch de hidratação.
+// botão "Reconstruir agora" (build → deploy). Dados reais via seam _lib/musica.ts.
+// A pré-visualização de faixa e o "Reconstruir agora" continuam SIMULADOS: não
+// fazem pedidos — mostram estado local (como as páginas Jobs/Live). Segredos/.env
+// nunca aparecem aqui. Valores de "em janela / no ar" vêm do seam (relógio de
+// Lisboa no servidor) → sem mismatch de hidratação.
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -25,7 +25,26 @@ import {
   IconMusica,
 } from "./icons";
 import type { MusicaData, Pool, Track, TrackEstado } from "../../_lib/musica";
-import { demoReconstruir } from "../../_lib/musica";
+
+// Retorno do botão demo "Reconstruir agora" (NÃO persiste; puro e client-safe —
+// vive aqui e não no seam _lib/musica.ts, que é server-only por importar
+// azuracast-read/next/headers). Aponta para os jobs reais de _lib/jobs.ts; a
+// página Jobs mostra a execução real ao ligar.
+type ReconstruirResult = {
+  jobKey: "music-build" | "music-deploy";
+  runId: string;
+  nota: string;
+};
+
+// Simula o disparo do botão "Reconstruir agora" (build → deploy). NÃO persiste;
+// devolve um runId determinístico que aponta para a página Jobs.
+function demoReconstruir(slug: string): ReconstruirResult {
+  return {
+    jobKey: "music-build",
+    runId: `music-build-${slug}-demo`,
+    nota: "demonstração — dispara music-build → music-deploy (rotação com teto), sem restart",
+  };
+}
 
 type ChipTone = "ok" | "neutral" | "warn" | "danger" | "live";
 
@@ -50,7 +69,7 @@ export default function MusicLibrary({ data }: { data: MusicaData }) {
   return (
     <>
       <Card className="p-4">
-        <CardHeader title="Pools por programa" hint="janela vs agora · 14:20 Lisboa" />
+        <CardHeader title="Pools por programa" hint="janela vs agora · Lisboa" />
         <ul className="mt-3 space-y-2">
           {data.pools.map((p) => (
             <li key={p.slug}>

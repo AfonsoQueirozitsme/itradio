@@ -1,6 +1,8 @@
-// Dados dos PROGRAMAS (grelha / grelha de programação). SEAM de ligação: hoje
-// devolve PLACEHOLDERS; quando ligarmos, só este ficheiro muda — os componentes
-// que o consomem ficam iguais. Reflete a grelha REAL da IT.FM (Boot Matinal,
+// Dados dos PROGRAMAS (grelha / grelha de programação). SEAM de ligação —
+// LIGADO aos dados reais (overlay sobre o MOCK: pool.atual do manifest,
+// playlistEnabled/estado das playlists do AzuraCast, proximaEntrada e kpis.proximo
+// da grelha; segmentos/jingle/diasSemana ficam estáticos). Contrato e MOCK ficam
+// FIXOS. Reflete a grelha REAL da IT.FM (Boot Matinal,
 // Ctrl+Alt+Ritmo, Tuga Underground, Pause & Play, Hora de Ponta, Modo Noturno).
 // Os mocks do painel.ts / live.ts / locutores.ts já estão alinhados a esta
 // grelha — todos os ecrãs (e a barra global "Em direto") concordam.
@@ -37,6 +39,9 @@
 // senão "agendado"; "pausado" = playlist is_enabled:false no AzuraCast.
 // NB: as janelas são horas de Lisboa (host/container em UTC → converter na
 // ligação real). NUNCA gerir segredos/.env aqui.
+
+import { getMusicManifest, getPlaylists, findPlaylistByName, lisbonNow } from "./azuracast-read";
+import { programaAt, proximoArranque, fimJanelaAt, hhmmToClock, GRELHA } from "./grelha";
 
 export type ProgramaEstado = "no_ar" | "agendado" | "pausado";
 export type Janela = { inicio: string; fim: string }; // "07:00","10:00" Lisboa
@@ -297,9 +302,93 @@ const MOCK: ProgramasData = {
   },
 };
 
+// HHMM inteiro (700) → minutos do dia (420). Puro, sem I/O.
+const hhmmToMin = (hhmm: number): number => Math.floor(hhmm / 100) * 60 + (hhmm % 100);
+
+// "proximaEntrada" DERIVADA do estado + grelha (sempre disponível, sem I/O):
+//   pausado  → não vai ao ar; no_ar → até ao fim da janela atual; agendado →
+//   PRÓXIMO arranque DESTE programa. Para janela partida (Sofia: 10–12 + 12:30–13)
+//   escolhe a próxima janela ainda por arrancar HOJE; se já passaram todas hoje,
+//   a mais cedo de AMANHÃ. (Sem isto, no intervalo 12:00–12:30 a Sofia mostrava
+//   "amanhã 10:00" quando na verdade volta ao ar hoje às 12:30.)
+function proximaEntradaDe(estado: ProgramaEstado, slug: string, hhmm: number): string {
+  if (estado === "pausado") return "pausado — não vai ao ar";
+  if (estado === "no_ar") return `no ar até ${fimJanelaAt(hhmm)}`;
+  // agendado — próxima janela por arrancar hoje (a mais cedo depois de agora), ou
+  // então a janela mais cedo do dia para amanhã.
+  const windows = GRELHA.find((p) => p.slug === slug)?.windows;
+  if (!windows || windows.length === 0) return "agendado"; // defensivo: slug sem grelha
+  const maisCedo = windows.reduce((a, b) => (b.inicioHHMM < a.inicioHHMM ? b : a));
+  const hojeAinda = windows
+    .filter((win) => win.inicioHHMM > hhmm)
+    .sort((a, b) => a.inicioHHMM - b.inicioHHMM)[0];
+  return hojeAinda ? `hoje ${hojeAinda.inicio}` : `amanhã ${maisCedo.inicio}`;
+}
+
 export async function getProgramasData(): Promise<ProgramasData> {
-  // TODO(ligação): substituir MOCK por leituras reais (programs.mjs + playlists
-  // AzuraCast + manifest das pools + nowplaying). Manter a forma de ProgramasData
-  // para não mexer na UI; converter as janelas de Lisboa a partir de UTC aqui.
-  return MOCK;
+  // Âncora de Lisboa (servidor) — deriva estado / proximaEntrada / kpis.proximo.
+  const clock = lisbonNow();
+
+  // Leituras reais em paralelo (memoizadas por render em azuracast-read):
+  //   manifest  → build-music/manifest.json (nº de faixas na pool por slug)
+  //   playlists → GET /station/{id}/playlists (is_enabled → estado "pausado")
+  const [manifest, playlists] = await Promise.all([getMusicManifest(), getPlaylists()]);
+
+  // ── kpis — contadores estáticos do MOCK; só `proximo` é dinâmico (grelha).
+  const nx = proximoArranque(clock.hhmm);
+  let emMin = hhmmToMin(nx.inicioHHMM) - clock.minutesOfDay;
+  if (nx.inicioHHMM <= clock.hhmm) emMin += 1440; // arranque já passou hoje → amanhã
+  const kpis: ProgramasData["kpis"] = {
+    totalProgramas: MOCK.kpis.totalProgramas,
+    horasLocutor: MOCK.kpis.horasLocutor,
+    horasRotacao: MOCK.kpis.horasRotacao,
+    totalHoras: MOCK.kpis.totalHoras,
+    locutoresAtivos: MOCK.kpis.locutoresAtivos,
+    proximo: { nome: nx.programa.nome, hora: hhmmToClock(nx.inicioHHMM), emMin },
+  };
+
+  // ── Overlay por programa: parte do conteúdo ESTÁTICO do MOCK (segmentos,
+  // jingle, diasSemana, metadados da pool) e sobrepõe só os campos dinâmicos.
+  const programas: Programa[] = MOCK.programas.map((p) => {
+    // pool — só `atual` muda (nº de faixas do manifest p/ o slug); real-a-zero
+    // honesto quando o manifest existe mas o programa não tem faixas na pool.
+    const atual = manifest ? (manifest.music?.[p.slug]?.length ?? 0) : p.pool.atual;
+    const pool: Pool = { ...p.pool, atual };
+
+    // playlistEnabled — is_enabled da playlist AzuraCast. Sem lista → degrada ao
+    // mock; sem correspondência de nome → degrada ao mock (não inventa true).
+    let playlistEnabled = p.playlistEnabled;
+    if (playlists !== null) {
+      const pl = findPlaylistByName(playlists, p.pool.playlist);
+      playlistEnabled = pl ? (pl.is_enabled ?? true) : p.playlistEnabled;
+    }
+
+    // estado — DERIVADO: sem playlists → mock (preserva o demo "pausado");
+    // senão pausado > no ar (grelha em Lisboa) > agendado.
+    let estado: ProgramaEstado;
+    if (playlists === null) {
+      estado = p.estado;
+    } else if (!playlistEnabled) {
+      estado = "pausado";
+    } else if (programaAt(clock.hhmm)?.slug === p.slug) {
+      estado = "no_ar";
+    } else {
+      estado = "agendado";
+    }
+
+    return {
+      ...p,
+      pool,
+      playlistEnabled,
+      estado,
+      proximaEntrada: proximaEntradaDe(estado, p.slug, clock.hhmm),
+    };
+  });
+
+  return {
+    agora: clock.clock,
+    kpis,
+    programas,
+    madrugada: MOCK.madrugada,
+  };
 }

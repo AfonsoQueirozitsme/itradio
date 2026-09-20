@@ -1,7 +1,9 @@
 // Dados dos Segmentos (inserções recorrentes que pontuam a emissão: boletim de
-// notícias, meteo, trânsito e sweepers/IDs). SEAM de ligação: hoje devolve
-// PLACEHOLDERS; quando ligarmos, só este ficheiro muda — a UI que o consome fica
-// igual. Ao contrário dos Programas, os segmentos NÃO são playlists do AzuraCast:
+// notícias, meteo, trânsito e sweepers/IDs). SEAM de ligação — LIGADO (overlay
+// sobre o MOCK: injector real do backup .liq mais recente — chars/ultimoRestart —
+// e o próximo disparo derivado do relógio; slots/ducking/fonte ficam baked, como
+// espelho do segments_mix.liq). Contrato e MOCK ficam FIXOS. Ao contrário dos
+// Programas, os segmentos NÃO são playlists do AzuraCast:
 // um injetor Liquidsoap corre o seu próprio agendador e faz ducking da música.
 //
 // Fontes reais previstas (caminhos relativos à raiz do repo it_radio):
@@ -28,6 +30,8 @@
 //     log journald `label="itfm_segments"` → estado on-air do injetor.
 // NB: as horas são de Lisboa (host/container em UTC → converter na ligação).
 // NB: segredos (.env) NUNCA são geridos nem mostrados aqui.
+
+import { getNewsState, lisbonNow, listStationDirStats, readStationFile, relativeFromNow } from "./azuracast-read";
 
 export type SegTipo = "noticias" | "meteo" | "transito" | "sweeper" | "id";
 export type SegEstado = "ativo" | "pausado";
@@ -216,7 +220,132 @@ const MOCK: SegmentosData = {
   ],
 };
 
+// pad de 2 dígitos ("7" → "07"). Local (só números de relógio — não formata datas).
+function pad2(n: number): string {
+  return n.toString().padStart(2, "0");
+}
+
+// PRÓXIMO DISPARO de um segmento a partir do relógio de Lisboa (nowMin = minutos
+// do dia). Varre cada slot e cada hora → candidato em minutos do dia
+// (hora*60 + slot.minuto). Escolhe o menor candidato ESTRITAMENTE > agora; se já
+// passaram todos hoje, o menor de todos + 1440 (amanhã). Sem slots → null. Puro:
+// só depende dos slots (BAKED) e de nowMin (nada de I/O, nada de Date do cliente).
+function proximoDisparo(
+  slots: SegSlot[],
+  nowMin: number,
+): { abs: string; emMin: number; slotLabel: string } | null {
+  if (!slots.length) return null;
+  type Cand = { min: number; hora: number; minuto: number; label: string };
+  const cands: Cand[] = [];
+  for (const slot of slots) {
+    for (const hora of slot.horas) {
+      cands.push({ min: hora * 60 + slot.minuto, hora, minuto: slot.minuto, label: slot.label });
+    }
+  }
+  if (!cands.length) return null;
+  // menor candidato ainda por vir hoje…
+  const futuros = cands.filter((c) => c.min > nowMin).sort((a, b) => a.min - b.min);
+  if (futuros.length) {
+    const c = futuros[0];
+    return { abs: `${pad2(c.hora)}:${pad2(c.minuto)}`, emMin: c.min - nowMin, slotLabel: c.label };
+  }
+  // …ou, se já passaram todos, o primeiro de amanhã (dá a volta ao dia).
+  const c = cands.slice().sort((a, b) => a.min - b.min)[0];
+  return {
+    abs: `${pad2(c.hora)}:${pad2(c.minuto)} (amanhã)`,
+    emMin: c.min + 1440 - nowMin,
+    slotLabel: c.label,
+  };
+}
+
 export async function getSegmentosData(): Promise<SegmentosData> {
-  // TODO(ligação): substituir MOCK por leituras reais mantendo a forma de SegmentosData.
-  return MOCK;
+  // Âncora determinística de Lisboa (a UI recalcula "emMin" a partir daqui, sem
+  // mismatch de hidratação — igual ao live.ts). nowMin = minutos do dia.
+  const clock = lisbonNow();
+  const nowMin = clock.minutesOfDay;
+
+  // Leituras reais em paralelo (memoizadas por render em azuracast-read):
+  //   • build/ → achar o backup mais recente do injetor.
+  //   • news-state → nº de manchetes do último boletim (só p/ meta do preview).
+  const [files, news] = await Promise.all([listStationDirStats("build"), getNewsState()]);
+
+  // ── Injetor — best-effort SEM sondar o backend: a existência de um backup
+  // aplicado (custom_config.backup-*.liq, escrito pelo deploy-segments antes do
+  // PUT+restart) é o nosso sinal de "aplicado". O mais recente (maior mtime)
+  // ancora o estado; sem backup → tudo cai no MOCK.
+  const backups = files
+    .filter((f) => /^custom_config\.backup.*\.liq$/.test(f.name))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const newest = backups[0];
+
+  let injector = MOCK.injector;
+  if (newest) {
+    // O backup é escrito ANTES do PUT+restart (deploy-segments.mjs) → o seu MTIME
+    // marca o último apply (→ ultimoRestart, correto), mas o seu CONTEÚDO é a config
+    // ANTERIOR. Para o tamanho, lemos a FONTE do injetor (liquidsoap/segments_mix.liq
+    // — a lógica que é aplicada; difere da config final só pela substituição de
+    // {{MEDIA_DIR}}). Leitura falha → cai no mock.
+    const src = await readStationFile("liquidsoap/segments_mix.liq");
+    injector = {
+      ativo: true, // houve deploy do injetor (não probamos o estado on-air do backend).
+      ultimoRestart: relativeFromNow(newest.mtimeMs), // mtime do backup = último apply.
+      customConfigChars: src?.length ?? MOCK.injector.customConfigChars,
+    };
+  }
+
+  // ── Segmentos — a lista MIRRORS o segments_mix.liq e fica BAKED (slots/ducking/
+  // fonte/preview/estado do MOCK). Só sobrepomos o campo DINÂMICO `proxima` (e, nas
+  // notícias, a meta do preview com o nº real de manchetes; o corpo continua o
+  // guião do MOCK — não há guião real em disco). Zero real de manchetes → mostra 0.
+  const segmentos = MOCK.segmentos.map((seg) => {
+    const proxima =
+      seg.estado === "ativo" && seg.slots.length ? proximoDisparo(seg.slots, nowMin) : null;
+    let preview = seg.preview;
+    if (seg.tipo === "noticias" && typeof news?.count === "number") {
+      preview = { ...seg.preview, meta: `guião · ${news.count} manchetes · ~0:52` };
+    }
+    return { ...seg, proxima, preview };
+  });
+
+  // ── Próximo — o disparo mais próximo entre os segmentos ATIVOS (menor emMin).
+  // Reutiliza o `proxima` já computado; ativos sem slots (sweeper) ficam de fora.
+  // Nenhum computável → MOCK.proximo.
+  let proximo = MOCK.proximo;
+  const comProxima = segmentos.filter((s) => s.estado === "ativo" && s.proxima != null);
+  if (comProxima.length) {
+    const melhor = comProxima.reduce((a, b) => (b.proxima!.emMin < a.proxima!.emMin ? b : a));
+    proximo = {
+      segId: melhor.id,
+      tipo: melhor.tipo,
+      nome: melhor.nome,
+      abs: melhor.proxima!.abs,
+      emMin: melhor.proxima!.emMin,
+      slotLabel: melhor.proxima!.slotLabel,
+    };
+  }
+
+  // ── Resumo — tudo derivado dos segmentos BAKED + relógio (nunca falha, nunca
+  // cai no mock): ativos/pausados = contagem por estado; disparosHoje = flancos já
+  // decorridos hoje nos segmentos ATIVOS (hora*60+minuto <= agora).
+  const ativos = segmentos.filter((s) => s.estado === "ativo").length;
+  const pausados = segmentos.filter((s) => s.estado === "pausado").length;
+  const disparosHoje = segmentos
+    .filter((s) => s.estado === "ativo")
+    .reduce(
+      (acc, s) =>
+        acc +
+        s.slots.reduce(
+          (a, slot) => a + slot.horas.filter((h) => h * 60 + slot.minuto <= nowMin).length,
+          0,
+        ),
+      0,
+    );
+
+  return {
+    agoraLisboa: clock.clock,
+    injector,
+    proximo,
+    resumo: { ativos, pausados, disparosHoje },
+    segmentos,
+  };
 }
