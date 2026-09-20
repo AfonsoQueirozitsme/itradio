@@ -10,14 +10,18 @@
 //   ocupacaoGrelha→ grelha estática (soma das janelas dos 6 programas / 24 h).
 //   proximoSegmento→ próximo segmento do injetor (segments_mix.liq via _lib/
 //                   segmentos.ts): trânsito/meteo/notícias — alinhado com Segmentos.
-//   ouvintesHoje  → série diária de ouvintes (charts.daily). Real-a-zero honesto.
+//   ouvintesHoje  → série HORÁRIA de ouvintes de HOJE (charts.hourly.all, intervalo
+//                   start=end=hoje), cortada às horas já decorridas. Pico = hora
+//                   com mais ouvintes até agora ("15h"). Real-a-zero honesto.
 //   pools         → build-music/manifest.json (nº de faixas por slug) + poolCap.
 //   proximos      → grelha (próximos arranques) + próximo boletim :30.
 
 import {
   getListenerDaily,
+  getListenerHourlyToday,
   getMusicManifest,
   getNowPlaying,
+  lisbonDateISO,
   lisbonNow,
   type LisbonClock,
 } from "./azuracast-read";
@@ -154,11 +158,15 @@ function pad2(n: number): string {
 
 export async function getPainelData(): Promise<PainelData> {
   const clock = lisbonNow();
+  const hojeISO = lisbonDateISO(clock.ms); // dia de Lisboa ancorado ao mesmo instante
 
   // Leituras reais em paralelo (todas memoizadas por render em azuracast-read).
-  const [np, daily, manifest] = await Promise.all([
+  //   • daily      → 2 semanas, um ponto/dia (spark + delta do "Ouvintes agora").
+  //   • hourlyToday→ hoje, 24 valores por hora (arco de "Ouvintes hoje").
+  const [np, daily, hourlyToday, manifest] = await Promise.all([
     getNowPlaying(),
     getListenerDaily(),
+    getListenerHourlyToday(hojeISO),
     getMusicManifest(),
   ]);
 
@@ -173,13 +181,28 @@ export async function getPainelData(): Promise<PainelData> {
     ouvintesAgora = { value, delta, spark };
   }
 
-  // ── Ouvintes hoje — série diária real (pico = dia com mais ouvintes).
+  // ── Ouvintes hoje — série HORÁRIA real de HOJE (Lisboa), cortada às horas já
+  // decorridas (sem barras "futuras" a zero). hourlyToday é um array de 24 números
+  // indexado pela HORA (0–23) → índice === hora, picoHora = "{hora}h" ("15h").
+  // O pico é a hora com mais ouvintes ATÉ AGORA (desloca-se ao longo do dia).
+  // Série toda a zero (analytics de hoje ainda não consolidada, ou station recém-
+  // -arrancada) → cai no MOCK: um arco sem dados não informa e é quase de certeza
+  // um atraso de agregação, não "0 ouvintes o dia todo" (o "0 agora" honesto vive
+  // no cartão "Ouvintes agora", esse sim mostra o zero real).
   let ouvintesHoje = MOCK.ouvintesHoje;
-  if (dailyYs && dailyYs.length >= 1 && daily) {
-    let picoIndex = 0;
-    for (let i = 1; i < dailyYs.length; i++) if (dailyYs[i] > dailyYs[picoIndex]) picoIndex = i;
-    const picoHora = lisbonWeekdayShort(daily[picoIndex]?.x);
-    ouvintesHoje = { serie: dailyYs, picoIndex, picoLabel: String(dailyYs[picoIndex]), picoHora };
+  if (Array.isArray(hourlyToday) && hourlyToday.length) {
+    const ate = Math.min(clock.hour, hourlyToday.length - 1);
+    const serie = hourlyToday.slice(0, ate + 1).map((n) => (Number.isFinite(n) ? n : 0));
+    if (serie.some((n) => n > 0)) {
+      let picoIndex = 0;
+      for (let i = 1; i < serie.length; i++) if (serie[i] > serie[picoIndex]) picoIndex = i;
+      ouvintesHoje = {
+        serie,
+        picoIndex,
+        picoLabel: String(serie[picoIndex]),
+        picoHora: `${picoIndex}h`, // índice === hora do dia
+      };
+    }
   }
 
   // ── Pools de música — contagem por programa (slug) do manifest.
@@ -204,12 +227,4 @@ export async function getPainelData(): Promise<PainelData> {
     pools,
     proximos: proximosDaGrelha(clock),
   };
-}
-
-// "Sáb" / "Ter" — dia da semana curto (Lisboa) de um epoch ms. Vazio se inválido.
-function lisbonWeekdayShort(ms?: number): string {
-  if (typeof ms !== "number" || !Number.isFinite(ms)) return "";
-  return new Intl.DateTimeFormat("pt-PT", { timeZone: "Europe/Lisbon", weekday: "short" })
-    .format(new Date(ms))
-    .replace(".", "");
 }

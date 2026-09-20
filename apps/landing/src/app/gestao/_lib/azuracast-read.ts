@@ -161,12 +161,18 @@ export type AzPlaylist = {
   schedule_items?: AzScheduleWindow[];
 };
 
-// reports/overview/charts → daily.metrics[0].data = [{x: epochMs, y: ouvintes}]
+// reports/overview/charts → duas séries que consumimos:
+//   • daily.metrics[0].data = [{x: epochMs, y: ouvintes}] — um ponto por dia.
+//   • hourly.all.metrics[0].data = number[] — 24 valores; a HORA É o ÍNDICE (0–23),
+//     com `labels` ["0:00"…"23:00"] em paralelo. NB: os pontos horários são
+//     ESCALARES (não {x,y}, ao contrário do daily). Fonte: ChartsAction.php do
+//     AzuraCast (categorias hourly: all + day0…day6; aqui só lemos `all`).
 export type AzChartPoint = { x: number; y: number };
 type AzChartMetric = { label?: string; data?: AzChartPoint[] };
+type AzHourlyCategory = { labels?: string[]; metrics?: Array<{ label?: string; data?: number[] }> };
 type AzOverviewCharts = {
   daily?: { metrics?: AzChartMetric[] };
-  hourly?: { all?: unknown };
+  hourly?: { all?: AzHourlyCategory };
 };
 
 // ── Leitores tipados (cada um → T | null) ─────────────────────────────────────
@@ -221,6 +227,24 @@ export async function getListenerDaily(): Promise<AzChartPoint[] | null> {
     `/api/station/${AZ_STATION_ID}/reports/overview/charts`,
   );
   const data = charts?.daily?.metrics?.[0]?.data;
+  return Array.isArray(data) ? data : null;
+}
+
+// Série HORÁRIA de ouvintes de HOJE (Lisboa) — array de 24 números, ÍNDICE = hora
+// (0–23). Pedimos explicitamente o intervalo de HOJE (start=end=dia de Lisboa): o
+// AzuraCast interpreta as datas no fuso da estação (Lisboa) e expande um `end` só
+// com data até ao fim do dia, por isso um único dia devolve só hoje. Sem o
+// parâmetro, o endpoint agrega as últimas 2 semanas (SOMA por hora) — não é o que
+// "Ouvintes hoje" quer. Horas sem ouvintes vêm 0 (zero real honesto). null só em
+// falha de leitura / forma inesperada. `dateISO` permite ancorar ao MESMO instante
+// de Lisboa que o resto do render (evita corrida à meia-noite); default = hoje.
+export async function getListenerHourlyToday(dateISO?: string): Promise<number[] | null> {
+  const iso = dateISO ?? lisbonDateISO();
+  if (!iso) return null;
+  const charts = await azGet<AzOverviewCharts>(
+    `/api/station/${AZ_STATION_ID}/reports/overview/charts?start=${iso}&end=${iso}`,
+  );
+  const data = charts?.hourly?.all?.metrics?.[0]?.data;
   return Array.isArray(data) ? data : null;
 }
 
