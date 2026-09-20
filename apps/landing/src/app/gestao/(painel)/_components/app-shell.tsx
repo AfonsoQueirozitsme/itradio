@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
   IconLogout,
   IconSearch,
   IconPlay,
+  IconFolder,
 } from "./icons";
 import type { LiveData } from "../../_lib/live";
 import { buildSchedule, fmtDur, parseHHMM } from "../../_lib/live-schedule";
@@ -33,6 +34,7 @@ const NAV: NavItem[] = [
   { href: "/gestao/segmentos", label: "Segmentos", Icon: IconSegmentos },
   { href: "/gestao/musica", label: "Música", Icon: IconMusica },
   { href: "/gestao/live", label: "Live", Icon: IconLog },
+  { href: "/gestao/ficheiros", label: "Ficheiros", Icon: IconFolder },
   { href: "/gestao/jobs", label: "Jobs", Icon: IconJobs },
   { href: "/gestao/settings", label: "Settings", Icon: IconSettings },
 ];
@@ -51,17 +53,7 @@ function initials(name: string) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// Pílula de "ouvintes agora" na navbar — só no Live. Número base determinístico
-// (sem mismatch de hidratação) com pequena deriva no cliente (mock).
-function LiveListeners() {
-  const [n, setN] = useState(342);
-  useEffect(() => {
-    const id = setInterval(() => {
-      // deriva suave determinística por passo (sem Math.random)
-      setN((v) => Math.max(0, v + (((v * 7 + 3) % 11) - 5)));
-    }, 4000);
-    return () => clearInterval(id);
-  }, []);
+function LiveListeners({ count }: { count: number }) {
   return (
     <span
       title="Ouvintes agora · ao vivo"
@@ -71,7 +63,7 @@ function LiveListeners() {
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-75" />
         <span className="relative inline-flex h-2 w-2 rounded-full bg-brand" />
       </span>
-      <span className="tabular-nums">{n}</span>
+      <span className="tabular-nums">{count}</span>
       <span className="hidden font-normal text-[var(--gray)] sm:inline">ouvintes</span>
     </span>
   );
@@ -84,10 +76,27 @@ function LiveListeners() {
 // de um valor determinístico do seam (sem mismatch de hidratação).
 function GlobalNowBar({ live }: { live: LiveData }) {
   const [nowSec, setNowSec] = useState(live.decorridoInicial);
+  const anchorRef = useRef(Date.now());
+
   useEffect(() => {
-    const id = setInterval(() => setNowSec((v) => v + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
+    const anchor = anchorRef.current;
+    const base = live.decorridoInicial;
+
+    const sync = () => setNowSec(base + Math.floor((Date.now() - anchor) / 1000));
+    const id = setInterval(sync, 1000);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [live.decorridoInicial]);
 
   const rows = buildSchedule(live.itens, parseHHMM(live.blocoInicio), nowSec);
   const playing = rows.find((r) => r.estado === "playing") ?? null;
@@ -220,7 +229,7 @@ export default function AppShell({
               </span>
             </button>
             <span className="flex-1 sm:hidden" />
-            <LiveListeners />
+            <LiveListeners count={live.now.ouvintes} />
             <button
               type="button"
               aria-label="Notificações"

@@ -278,3 +278,122 @@ export function assembleScript(items, opts = {}) {
   const text = segs.map((s) => s.text).join("\n");
   return { segments: segs, text, totalChars: total(segs), count: list.length };
 }
+
+// ---------- AI script generation (Claude via AWS Bedrock) ----------
+// Optional: rewrites raw headlines into a natural, radio-style news script.
+// Falls back to assembleScript() on any failure (import missing, API error, parse error).
+
+let _BedrockClient = null;
+let _bedrockImportFailed = false;
+
+async function getBedrockClient() {
+  if (_BedrockClient) return _BedrockClient;
+  if (_bedrockImportFailed) return null;
+  try {
+    const mod = await import("@anthropic-ai/bedrock-sdk");
+    const AnthropicBedrock = mod.default || mod.AnthropicBedrock;
+    _BedrockClient = new AnthropicBedrock({
+      awsRegion: process.env.AWS_REGION || "eu-west-1",
+    });
+    return _BedrockClient;
+  } catch {
+    _bedrockImportFailed = true;
+    return null;
+  }
+}
+
+function buildAIPrompt(items, { hourLisbon, charBudget }) {
+  const part = daypart(hourLisbon);
+  const greet = GREETING[part];
+  const headlines = items.map((it, i) => {
+    let entry = `${i + 1}. [${it.source}] ${it.title}`;
+    if (it.hasBody && it.summary) entry += ` — ${it.summary}`;
+    return entry;
+  }).join("\n");
+
+  return `Es um argumentista de rádio portuguesa. Escreve um guião de boletim de notícias curto para a estação IT.FM, em português de Portugal (pt-PT), para dois co-apresentadores:
+- RUBEN: Ruben Mateus (voz masculina)
+- MARIANA: Mariana Serrano (voz feminina)
+
+Parte do dia: ${part} (saudação: "${greet}")
+
+Manchetes disponíveis:
+${headlines}
+
+REGRAS:
+1. Começa com uma saudação do Ruben: "${greet}, está a ouvir a IT.FM..." (adapta naturalmente)
+2. Alterna as notícias entre RUBEN e MARIANA (3-5 manchetes), num estilo conversacional de rádio
+3. Usa conectores naturais entre manchetes (entretanto, por outro lado, ainda em destaque...)
+4. Termina com um fecho da voz que NÃO leu a última manchete: "Foram as notícias..." ou similar
+5. Orçamento MÁXIMO: ~${charBudget} caracteres no total (soma de todo o texto)
+6. NÃO inventes factos — usa apenas o que está nas manchetes
+7. O texto será lido por TTS, por isso deve soar natural quando falado
+
+FORMATO DE SAÍDA (obrigatório, uma linha por segmento):
+[RUBEN] texto do segmento
+[MARIANA] texto do segmento
+[RUBEN] texto do segmento
+...
+
+Responde APENAS com as linhas [RUBEN]/[MARIANA], sem comentários adicionais.`;
+}
+
+function parseAIResponse(text, voiceA, voiceB) {
+  const lines = text.trim().split("\n").filter((l) => l.trim());
+  const segments = [];
+  for (const line of lines) {
+    const m = line.match(/^\[(?:RUBEN|MARIANA)\]\s*(.+)$/i);
+    if (!m) continue;
+    const isRuben = /^\[RUBEN\]/i.test(line);
+    segments.push({
+      voice: isRuben ? voiceA : voiceB,
+      text: fixForTTS(m[1].trim()),
+    });
+  }
+  return segments;
+}
+
+/**
+ * Gera o guião via Claude (AWS Bedrock). Devolve o mesmo formato que assembleScript().
+ * Em caso de falha (SDK em falta, erro de API, parse inválido), devolve null.
+ *
+ *   items: saída de selectItems
+ *   opts: { hourLisbon, voiceA, voiceB, charBudget }
+ */
+export async function assembleScriptAI(items, opts = {}) {
+  const { hourLisbon = 9, voiceA = "A", voiceB = "B", charBudget = 700 } = opts;
+  const model = process.env.NEWS_AI_MODEL || "anthropic.claude-sonnet-4-20250514";
+
+  const client = await getBedrockClient();
+  if (!client) return null;
+
+  const prompt = buildAIPrompt(items, { hourLisbon, charBudget });
+
+  try {
+    const response = await client.messages.create({
+      model,
+      max_tokens: 1024,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const aiText = response.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+
+    if (!aiText.trim()) return null;
+
+    const segments = parseAIResponse(aiText, voiceA, voiceB);
+    if (segments.length < 3) return null; // precisa de pelo menos opener + 1 manchete + closer
+
+    const text = segments.map((s) => s.text).join("\n");
+    const totalChars = segments.reduce((n, s) => n + s.text.length, 0);
+    // count = segmentos menos opener e closer
+    const count = Math.max(1, segments.length - 2);
+
+    return { segments, text, totalChars, count };
+  } catch (err) {
+    console.warn(`  ! AI script generation failed: ${err.message || err}`);
+    return null;
+  }
+}

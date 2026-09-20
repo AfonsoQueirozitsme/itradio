@@ -10,7 +10,7 @@
 // Lisboa no servidor) → sem mismatch de hidratação.
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardHeader, StatusChip } from "./ui";
 import { PoolBar } from "./charts";
 import {
@@ -96,6 +96,9 @@ export default function MusicLibrary({ data }: { data: MusicaData }) {
                     ) : (
                       <StatusChip tone="neutral">Fora de janela</StatusChip>
                     )}
+                    {p.djMode ? (
+                      <StatusChip tone="info">DJ mode</StatusChip>
+                    ) : null}
                   </div>
                   <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--gray)]">{p.playlist}</div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--gray)]">
@@ -242,35 +245,34 @@ function Meta({ label, valor, nota }: { label: string; valor: string; nota: stri
   );
 }
 
-// ── Linha de faixa (com pré-visualização simulada) ───────────────────────────
+// ── Linha de faixa (com pré-escuta real via proxy) ──────────────────────────
 function TrackRow({ track }: { track: Track }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [prog, setProg] = useState(0);
 
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      setProg((v) => {
-        if (v >= 100) {
-          setPlaying(false);
-          return 0;
-        }
-        return v + 2;
+  function togglePlay() {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(`/api/gestao/audio?path=${encodeURIComponent(track.path)}`);
+      audioRef.current.addEventListener("timeupdate", () => {
+        const a = audioRef.current;
+        if (a && a.duration) setProg((a.currentTime / a.duration) * 100);
       });
-    }, 120);
-    return () => clearInterval(id);
-  }, [playing]);
+      audioRef.current.addEventListener("ended", () => { setPlaying(false); setProg(0); });
+    }
+    if (playing) { audioRef.current.pause(); setPlaying(false); }
+    else { audioRef.current.play(); setPlaying(true); }
+  }
+
+  useEffect(() => () => { audioRef.current?.pause(); audioRef.current = null; }, []);
 
   return (
     <li className="rounded-xl border border-[var(--line)] bg-[var(--card)] p-2.5">
       <div className="flex items-center gap-2.5">
         <button
           type="button"
-          onClick={() => {
-            setProg(0);
-            setPlaying((v) => !v);
-          }}
-          aria-label={playing ? "Pausar (demonstração)" : "Reproduzir (demonstração)"}
+          onClick={togglePlay}
+          aria-label={playing ? "Pausar" : "Reproduzir"}
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--ink)] text-white transition-transform hover:scale-105"
         >
           {playing ? <span className="text-[11px]">❚❚</span> : <IconPlay className="h-4 w-4" />}

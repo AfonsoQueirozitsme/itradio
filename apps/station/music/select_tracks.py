@@ -75,17 +75,41 @@ def playlist_id(entry):
     return pid[2:] if pid.startswith("VL") else pid
 
 
+# Playlists cujo título denuncia uma região/idioma fora do alvo da estação
+# (nenhum dos programas é Bollywood/OPM/K-pop/…). Termos escolhidos p/ baixo
+# falso-positivo — match por substring no título, minúsculas.
+REGION_DENY = (
+    "bollywood", "hindi", "tamil", "telugu", "punjabi", "bhojpuri", "kannada",
+    "pinoy", " opm", "opm ", "tagalog", "filipino",
+    "arabic", "turkish", "türkçe", "thai", "vietnam", "mandopop", "cantopop",
+    "k-pop", "kpop", "j-pop", "jpop", "trot", "bangla", "nepali",
+)
+
+
+def title_blocked(title):
+    t = (title or "").lower()
+    return any(k in t for k in REGION_DENY)
+
+
 def collect_from_search_playlists(yt, label, want, min_dur, max_dur, exclude, seen, out,
-                                  max_playlists=8, per_playlist=100):
+                                  max_playlists=12, per_playlist=80, max_buckets=6):
+    """Recolhe candidatos de VÁRIAS playlists e intercala-os em round-robin, para
+    que uma única playlist (eventualmente fora do género) não domine o pool. Salta
+    playlists cujo título denuncia região/idioma errados."""
     try:
         results = yt.search(label, filter="playlists", limit=max_playlists) or []
     except Exception as e:  # noqa: BLE001
         log(f'  ! search(playlists, "{label}") falhou: {e}')
         return
     log(f'  {len(results)} playlists p/ "{label}"')
+    buckets = []  # [(title, [tracks candidatas já filtradas por duração/exclude])]
     for r in results:
-        if len(out) >= want:
+        if len(buckets) >= max_buckets:
             break
+        title = r.get("title") or ""
+        if title_blocked(title):
+            log(f'    ⨯ "{title[:48]}" (região/idioma fora do alvo — ignorada)')
+            continue
         pid = playlist_id(r)
         if not pid:
             continue
@@ -94,11 +118,30 @@ def collect_from_search_playlists(yt, label, want, min_dur, max_dur, exclude, se
         except Exception as e:  # noqa: BLE001
             log(f'  ! get_playlist({pid}) falhou: {e}')
             continue
-        before = len(out)
+        cand = []
         for t in detail.get("tracks", []) or []:
-            if add_track(out, t, want, min_dur, max_dur, exclude, seen):
-                break
-        log(f'    · "{(r.get("title") or "")[:48]}" → +{len(out) - before}')
+            vid = t.get("videoId")
+            if not vid or vid in exclude or vid in seen:
+                continue
+            dur = parse_dur(t)
+            if dur and (dur < min_dur or dur > max_dur):
+                continue
+            cand.append(t)
+        if cand:
+            buckets.append((title, cand))
+            log(f'    · "{title[:48]}" → {len(cand)} candidatas')
+    # round-robin: 1 faixa de cada playlist por volta, até encher `want`
+    idx = 0
+    while len(out) < want:
+        progressed = False
+        for _, cand in buckets:
+            if idx < len(cand):
+                progressed = True
+                if add_track(out, cand[idx], want, min_dur, max_dur, exclude, seen):
+                    return
+        if not progressed:
+            break
+        idx += 1
 
 
 def collect_from_search_songs(yt, label, want, min_dur, max_dur, exclude, seen, out, limit=40):

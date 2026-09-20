@@ -1,0 +1,29 @@
+[Unit]
+# IT.FM — refresh diário da música (build trending + deploy por programa).
+# Corre NATIVAMENTE no VPS, contra o AzuraCast em http://localhost. Autónomo:
+# não depende do Mac nem de túneis SSH.
+Description=IT.FM daily music refresh (build trending + deploy per program)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=itradio
+Group=itradio
+WorkingDirectory=/home/itradio/itradio/apps/station
+# PATH explícito → o normalize (lib/audio) encontra o ffmpeg em /usr/bin.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# --env-file=.env: chave da API + AZURACAST_BASE_URL. Os filhos (build/deploy)
+# herdam process.env, logo não precisam do seu próprio --env-file.
+ExecStart=/usr/bin/node --env-file=.env music/daily-refresh.mjs
+# 6 programas × (seleção + download + normalize a -16 LUFS) ~ downloads em série;
+# o daily-refresh faz build→deploy por programa NA ORDEM das janelas (diogo 07:00
+# primeiro … goncalo 20:00 último), logo cada pool fica no ar muito antes da sua
+# janela mesmo com o total a demorar ~2h. Teto folgado p/ nunca ser morto a meio.
+TimeoutStartSec=14400
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+# Log tail-able (itradio é dono da pasta). journald também captura via -u.
+StandardOutput=append:/home/itradio/itradio/apps/station/music/.daily.log
+StandardError=append:/home/itradio/itradio/apps/station/music/.daily.log

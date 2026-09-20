@@ -1,0 +1,14 @@
+[Unit]
+Description=IT.FM daily music refresh — 05:00 Europe/Lisbon (antes da 1.ª janela, 07:00)
+
+[Timer]
+# Hora LOCAL de Lisboa (sufixo de timezone → DST tratado pelo systemd; o host
+# está em UTC). 05:00 dá ~2h de margem antes da 1.ª janela de música (07:00),
+# folgada para os 6 builds + deploys. Persistent=true → recupera se o servidor
+# estiver desligado à hora marcada.
+OnCalendar=*-*-* 05:00:00 Europe/Lisbon
+Persistent=true
+RandomizedDelaySec=180
+
+[Install]
+WantedBy=timers.target

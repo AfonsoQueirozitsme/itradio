@@ -10,7 +10,7 @@
 // programa) é simulada no cliente a partir de `data.agora` (valor determinístico
 // do seam → sem mismatch de hidratação) até ligarmos ao nowplaying + playlists.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardHeader, Stat, StatusChip } from "./ui";
 import { PoolBar } from "./charts";
 import {
@@ -554,6 +554,7 @@ function ProgramaDrawer({
   onClose: () => void;
 }) {
   const [editar, setEditar] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [prog01, setProg01] = useState(0);
 
@@ -566,20 +567,21 @@ function ProgramaDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // reprodução falsa do jingle (barra de progresso simulada)
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      setProg01((v) => {
-        if (v >= 100) {
-          setPlaying(false);
-          return 100;
-        }
-        return v + 4;
+  // real audio playback for the jingle
+  function toggleJingle() {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(`/api/gestao/audio?path=${encodeURIComponent(prog.jingle.fonte)}`);
+      audioRef.current.addEventListener("timeupdate", () => {
+        const a = audioRef.current;
+        if (a && a.duration) setProg01((a.currentTime / a.duration) * 100);
       });
-    }, 120);
-    return () => clearInterval(id);
-  }, [playing]);
+      audioRef.current.addEventListener("ended", () => { setPlaying(false); setProg01(0); });
+    }
+    if (playing) { audioRef.current.pause(); setPlaying(false); }
+    else { audioRef.current.play(); setPlaying(true); }
+  }
+
+  useEffect(() => () => { audioRef.current?.pause(); audioRef.current = null; }, []);
 
   const pool = prog.pool;
 
@@ -693,7 +695,7 @@ function ProgramaDrawer({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setPlaying((v) => !v)}
+                  onClick={toggleJingle}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--ink)] text-white transition-transform hover:scale-105"
                   aria-label={playing ? "Pausar" : "Reproduzir"}
                 >
@@ -710,7 +712,7 @@ function ProgramaDrawer({
                   </div>
                 </div>
               </div>
-              <p className="mt-2 text-[10px] text-[var(--gray)]">Pré-escuta simulada (demonstração).</p>
+              <p className="mt-2 text-[10px] text-[var(--gray)]">Pré-escuta via proxy de áudio.</p>
             </div>
           </Section>
 

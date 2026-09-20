@@ -28,12 +28,17 @@
  *   --out=PATH  grava uma cópia local do mp3
  *   --stub      não chama o ElevenLabs — sintetiza voz-placeholder (testa o áudio sem gastar quota)
  *   --slot=HH   força a parte-do-dia da saudação (default: hora de Lisboa atual)
+ *   --ai-script  usa Claude (AWS Bedrock) para reescrever o guião em estilo rádio
+ *                (fallback automático ao builder mecânico se falhar)
  *
  * ENV (host, via apps/station/.env — NUNCA imprimir):
  *   AZURACAST_API_KEY (obrig.), AZURACAST_BASE_URL (def http://localhost),
  *   STATION_SHORTCODE (def it.fm), AZURACAST_CONTAINER (def azuracast),
  *   ELEVENLABS_API_KEY (obrig. p/ TTS), NEWS_VOICE_A/NEWS_VOICE_B (ids das vozes),
- *   NEWS_TTS_MODEL (def eleven_turbo_v2_5), NEWS_TOPN, NEWS_CHAR_BUDGET, NEWS_RENDER (local|docker).
+ *   NEWS_TTS_MODEL (def eleven_turbo_v2_5), NEWS_TOPN, NEWS_CHAR_BUDGET, NEWS_RENDER (local|docker),
+ *   NEWS_AI_SCRIPT (1|true|yes → activa o guião AI, equivalente a --ai-script),
+ *   NEWS_AI_MODEL (def anthropic.claude-sonnet-4-20250514, modelo Bedrock),
+ *   AWS_REGION (def eu-west-1), AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
  */
 
 import { execFile } from "node:child_process";
@@ -43,7 +48,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanItem, dedupe, selectItems, assembleScript, daypart } from "./format-news.mjs";
+import { cleanItem, dedupe, selectItems, assembleScript, assembleScriptAI, daypart } from "./format-news.mjs";
 
 const exec = promisify(execFile);
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -52,7 +57,7 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const BED = join(__dir, "audio", "beds", "news_bed.mp3");
 const VOICE_VOL = 1.84;
 const BED_VOL = 0.20;
-const NEWS_BED_VOL = +(BED_VOL * 0.8).toFixed(3); // 0.16
+const NEWS_BED_VOL = +(BED_VOL * 0.8 * 0.4).toFixed(3); // 0.064 — bed 60% mais baixa (era 0.16), voz mais à frente
 const VOICE_GAP = 0.2;
 const INTRO = 1.0;  // s de bed só, antes da voz (arranque musical)
 const OUTRO = 1.6;  // s de bed só, no fim
@@ -338,11 +343,26 @@ function lisbonHour() {
 }
 
 // ---------- monta o guião ----------
-async function buildScript(hourLisbon) {
+const AI_SCRIPT = /^(1|true|yes)$/i.test(process.env.NEWS_AI_SCRIPT || "");
+
+async function buildScript(hourLisbon, { aiScript = false } = {}) {
   const items = await gatherItems();
   const sel = selectItems(items, { topN: TOPN, maxPerCategory: 2, recencyHours: 12, nowMs: Date.now() });
   const variant = new Date().getUTCDate() % 2; // roda opener/closer por dia
-  const scriptObj = assembleScript(sel, { hourLisbon, voiceA: VOICE_A, voiceB: VOICE_B, charBudget: CHAR_BUDGET, withSummary: WITH_SUMMARY, variant });
+  const scriptOpts = { hourLisbon, voiceA: VOICE_A, voiceB: VOICE_B, charBudget: CHAR_BUDGET, withSummary: WITH_SUMMARY, variant };
+
+  // AI script mode: tenta Claude via Bedrock, fallback ao builder mecânico
+  if (aiScript) {
+    console.log("  a tentar guião AI (Claude via AWS Bedrock) …");
+    const aiResult = await assembleScriptAI(sel, scriptOpts);
+    if (aiResult) {
+      console.log("  ✓ guião AI gerado com sucesso");
+      return { items, sel, ...aiResult };
+    }
+    console.warn("  ! guião AI falhou — a usar builder mecânico (fallback)");
+  }
+
+  const scriptObj = assembleScript(sel, scriptOpts);
   return { items, sel, ...scriptObj };
 }
 
@@ -373,9 +393,9 @@ async function cmdProbe() {
 }
 
 // ---------- subcomando: feeds (read-only preview do guião) ----------
-async function cmdFeeds(argSlot) {
+async function cmdFeeds(argSlot, { aiScript = false } = {}) {
   const h = Number.isFinite(argSlot) ? argSlot : lisbonHour();
-  const { sel, segments, text, totalChars, count } = await buildScript(h);
+  const { sel, segments, text, totalChars, count } = await buildScript(h, { aiScript });
   console.log(`parte do dia: ${daypart(h)} · itens: ${count} (de ${sel.length} selecionados) · ${totalChars} chars\n`);
   const nameOf = (v) => (v === VOICE_A ? "Ruben " : v === VOICE_B ? "Mariana" : "??????");
   for (const s of segments) console.log(`  [${nameOf(s.voice)}] ${s.text}`);
@@ -388,6 +408,7 @@ async function cmdFeeds(argSlot) {
 // ---------- subcomando: generate ----------
 async function cmdGenerate(flags) {
   const force = !!flags.force, dryRun = !!flags["dry-run"], stub = !!flags.stub;
+  const aiScript = !!flags["ai-script"] || AI_SCRIPT;
   const outCopy = flags.out ? String(flags.out) : null;
   const h = Number.isFinite(+flags.slot) ? +flags.slot : lisbonHour();
   if (!dryRun) needKey();
@@ -397,8 +418,8 @@ async function cmdGenerate(flags) {
     return;
   }
 
-  console.log(`a montar guião (parte do dia: ${daypart(h)}) …`);
-  const { sel, segments, text, totalChars, count } = await buildScript(h);
+  console.log(`a montar guião (parte do dia: ${daypart(h)}${aiScript ? ", modo AI" : ""}) …`);
+  const { sel, segments, text, totalChars, count } = await buildScript(h, { aiScript });
   if (!count) die("sem itens de notícias (feeds vazios?) — mantém o ficheiro atual");
   console.log(`  ${count} manchetes · ${totalChars} chars · ${segments.length} segmentos (2 vozes)`);
 
@@ -528,7 +549,7 @@ async function main() {
   const { mode, flags } = parseArgs(process.argv.slice(2));
   if (!existsSync(BED)) die(`bed não encontrada: ${BED}`);
   if (mode === "probe") return cmdProbe();
-  if (mode === "feeds") return cmdFeeds(+flags.slot);
+  if (mode === "feeds") return cmdFeeds(+flags.slot, { aiScript: !!flags["ai-script"] || AI_SCRIPT });
   if (mode === "generate") return cmdGenerate(flags);
   if (mode === "setup") return cmdSetup(!!flags.yes);
   console.error("Uso: node news-live.mjs <probe|feeds|generate|setup> [flags]  (ver cabeçalho)");

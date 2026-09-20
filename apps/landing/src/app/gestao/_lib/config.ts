@@ -33,6 +33,13 @@ export const ITFM_STATION_DIR = process.env.ITFM_STATION_DIR ?? null;
 // /home/itradio/itfm-data (uploads, schedule.json, etc., nas fases seguintes).
 export const ITFM_DATA_DIR = process.env.ITFM_DATA_DIR ?? "/home/itradio/itfm-data";
 
+// Caminho do diretório de media do AzuraCast no host (montagem Docker do volume
+// de media). Usado para operações de escrita local (ex.: sentinel file
+// `.itfm_fire_news` que o Liquidsoap poll). Na VPS a media vive no volume Docker
+// mapeado para este caminho host; o user itradio tem permissão de escrita.
+export const ITFM_MEDIA_DIR =
+  process.env.ITFM_MEDIA_DIR ?? "/var/azuracast/stations/it.fm/media";
+
 // DEV-ONLY: renderiza o painel sem sessão AzuraCast, para construir a UI local
 // (onde não há AzuraCast em localhost:80). Cadeado DUPLO: só fora de produção E
 // com opt-in explícito. Server-only (sem prefixo NEXT_PUBLIC) → nunca vai para o

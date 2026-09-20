@@ -35,7 +35,7 @@ export default function Soundboard({ pads: initialPads }: { pads: (SoundPad | nu
   const [activeId, setActiveId] = useState<string | null>(null);
   const [prog, setProg] = useState(0);
   const [loop, setLoop] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     setPads(loadPads(initialPads));
@@ -47,8 +47,7 @@ export default function Soundboard({ pads: initialPads }: { pads: (SoundPad | nu
   }, [initialPads]);
 
   const stop = useCallback(() => {
-    if (timer.current) clearInterval(timer.current);
-    timer.current = null;
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     setActiveId(null);
     setProg(0);
     setLoop(false);
@@ -63,35 +62,34 @@ export default function Soundboard({ pads: initialPads }: { pads: (SoundPad | nu
         stop();
         return;
       }
-      if (timer.current) clearInterval(timer.current);
+      // parar o que estiver a tocar
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
       const total = durSecs(pad.dur);
       setActiveId(pad.id);
       setProg(0);
       setLoop(total === null);
-      if (total === null) return; // loop: fica ativo até nova pressão
-      // avança a barra em ~10 passos/seg
-      const stepMs = 100;
-      const inc = 100 / ((total * 1000) / stepMs);
-      timer.current = setInterval(() => {
-        setProg((v) => {
-          const next = v + inc;
-          if (next >= 100) {
-            if (timer.current) clearInterval(timer.current);
-            timer.current = null;
-            setActiveId(null);
-            return 0;
-          }
-          return next;
-        });
-      }, stepMs);
+
+      const audio = new Audio(`/api/gestao/audio?path=${encodeURIComponent(pad.ficheiro)}`);
+      audio.loop = total === null;
+      audio.addEventListener("timeupdate", () => {
+        if (audio.duration) setProg((audio.currentTime / audio.duration) * 100);
+      });
+      audio.addEventListener("ended", () => {
+        audioRef.current = null;
+        setActiveId(null);
+        setProg(0);
+      });
+      audioRef.current = audio;
+      audio.play();
     },
     [pads, activeId, stop],
   );
 
-  // limpeza do intervalo ao desmontar
+  // limpeza ao desmontar
   useEffect(() => {
     return () => {
-      if (timer.current) clearInterval(timer.current);
+      audioRef.current?.pause();
+      audioRef.current = null;
     };
   }, []);
 

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { programaAtual, type ProgramaAtual } from "./programacao";
+import { STREAM_URL } from "./site";
 
 /**
  * Cartão "No ar agora".
@@ -18,12 +19,40 @@ export default function ProgramaAtualCard({
   initial?: ProgramaAtual | null;
 }) {
   const [prog, setProg] = useState<ProgramaAtual | null>(initial);
+  const [ouvintes, setOuvintes] = useState(0);
 
   useEffect(() => {
     const update = () => setProg(programaAtual());
     update();
     const id = setInterval(update, 60_000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let cancel = false;
+    const npUrl = (() => {
+      try {
+        const u = new URL(STREAM_URL);
+        const parts = u.pathname.split("/").filter(Boolean);
+        const idx = parts.indexOf("listen");
+        const sc = idx >= 0 ? parts[idx + 1] : parts[0];
+        return sc ? `${u.origin}/api/nowplaying/${sc}` : null;
+      } catch { return null; }
+    })();
+    if (!npUrl) return;
+    async function poll() {
+      try {
+        const res = await fetch(npUrl!, { cache: "no-store" });
+        if (!res.ok || cancel) return;
+        const data = await res.json();
+        if (cancel) return;
+        const n = data?.listeners?.total;
+        if (typeof n === "number") setOuvintes(n);
+      } catch { /* ignore */ }
+    }
+    poll();
+    const id = setInterval(poll, 30_000);
+    return () => { cancel = true; clearInterval(id); };
   }, []);
 
   const foto = prog ? prog.locutor.foto : "/piloto-automatico.jpg";
@@ -57,6 +86,15 @@ export default function ProgramaAtualCard({
         </p>
         <p className="text-base font-semibold leading-tight">{titulo}</p>
         <p className="text-sm text-muted">{legenda}</p>
+        {ouvintes > 0 ? (
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/60 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white/80" />
+            </span>
+            <span className="tabular-nums">{ouvintes}</span> a ouvir agora
+          </p>
+        ) : null}
       </div>
     </section>
   );

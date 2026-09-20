@@ -128,7 +128,7 @@ export function Stat({
 }
 
 // ── Chip de estado (com ponto opcional; "no ar" tem ping) ───────────────────
-type ChipTone = "ok" | "neutral" | "warn" | "danger" | "live";
+type ChipTone = "ok" | "neutral" | "warn" | "danger" | "live" | "info";
 
 const CHIP_TONE: Record<ChipTone, string> = {
   ok: "bg-brand/15 text-[#0b3d1a]",
@@ -136,6 +136,7 @@ const CHIP_TONE: Record<ChipTone, string> = {
   warn: "bg-amber-100 text-amber-700",
   danger: "bg-red-100 text-red-700",
   live: "bg-brand/15 text-[#0b3d1a]",
+  info: "bg-violet-100 text-violet-700",
 };
 
 export function StatusChip({

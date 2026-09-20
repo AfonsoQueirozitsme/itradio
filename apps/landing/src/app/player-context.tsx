@@ -41,6 +41,8 @@ type PlayerState = {
   toggleMute: () => void;
   /** Frase de estado para leitores de ecrã (região aria-live). */
   statusText: string;
+  /** Número de ouvintes em tempo real (do nowplaying poll; 0 antes do 1.º play). */
+  ouvintes: number;
 };
 
 const PlayerContext = createContext<PlayerState | null>(null);
@@ -139,6 +141,7 @@ export function PlayerProvider({
   const [historico, setHistorico] = useState<Historico[]>([]);
   const [volume, setVolumeState] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [ouvintes, setOuvintes] = useState(0);
   // Espelhos para os handlers registados uma só vez (Media Session, teclado).
   const volumeRef = useRef(1);
   const mutedRef = useRef(false);
@@ -384,6 +387,7 @@ export function PlayerProvider({
         const streamer = data?.live?.streamer_name?.trim();
         const texto = (aoVivo && streamer ? streamer : songLabel(song)) || null;
         setNow({ texto, arte: (song.art as string) || null, aoVivo });
+        setOuvintes(typeof data?.listeners?.total === "number" ? data.listeners.total : 0);
 
         const hist: Record<string, unknown>[] = Array.isArray(data?.song_history) ? data.song_history : [];
         const lista = hist
@@ -560,6 +564,7 @@ export function PlayerProvider({
     setVolume,
     toggleMute,
     statusText,
+    ouvintes,
   };
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;

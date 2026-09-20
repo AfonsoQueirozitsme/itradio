@@ -10,6 +10,7 @@ import { Card, StatusChip } from "./ui";
 import { IconClose, IconTrash, IconGrid, IconGrip, IconAlert, IconCheck } from "./icons";
 import { HOTKEYS, type SettingsData, type SoundPad, type PadKind } from "../../_lib/settings";
 import { loadPads, savePads, swapPads } from "./soundboard-store";
+import FilePicker from "./file-picker";
 
 const KIND_LABEL: Record<PadKind, string> = {
   jingle: "Jingle",
@@ -227,6 +228,7 @@ function PadEditor({
   const [kind, setKind] = useState<PadKind>(pad?.kind ?? "jingle");
   const [ficheiro, setFicheiro] = useState(pad?.ficheiro ?? "");
   const [dur, setDur] = useState(pad?.dur ?? "0:00");
+  const [showFilePicker, setShowFilePicker] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -293,13 +295,32 @@ function PadEditor({
           </Field>
 
           <Field label="Ficheiro" hint="relativo a /home/itradio/itfm-data">
-            <input
-              value={ficheiro}
-              onChange={(e) => setFicheiro(e.target.value)}
-              placeholder="ex.: carts/id_pause_play.mp3"
-              className="w-full rounded-lg border border-[var(--line)] bg-[var(--card)] px-3 py-2 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--ink)]/30"
-            />
+            <div className="flex gap-2">
+              <input
+                value={ficheiro}
+                onChange={(e) => setFicheiro(e.target.value)}
+                placeholder="ex.: carts/id_pause_play.mp3"
+                className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--card)] px-3 py-2 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--ink)]/30"
+              />
+              <button
+                type="button"
+                onClick={() => setShowFilePicker(true)}
+                className="shrink-0 rounded-lg border border-[var(--line)] bg-[var(--bg)] px-3 py-2 text-xs font-medium text-[var(--gray)] transition-colors hover:border-[var(--ink)]/25 hover:text-[var(--ink)]"
+              >
+                Procurar...
+              </button>
+            </div>
           </Field>
+
+          {showFilePicker ? (
+            <FilePicker
+              onSelect={(path) => {
+                setFicheiro(path);
+                setShowFilePicker(false);
+              }}
+              onClose={() => setShowFilePicker(false)}
+            />
+          ) : null}
 
           <Field label="Duração" hint='"0:08" ou "loop"'>
             <input

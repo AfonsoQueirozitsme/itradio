@@ -7,7 +7,7 @@ import PlayerExpanded from "./player-expanded";
 import { programaAtual, type ProgramaAtual } from "./programacao";
 
 export default function PlayerBar() {
-  const { playing, loading, error, started, now, toggle, statusText } = usePlayer();
+  const { playing, loading, error, started, now, toggle, statusText, ouvintes } = usePlayer();
   const [prog, setProg] = useState<ProgramaAtual | null>(null);
   const [aberto, setAberto] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -66,6 +66,20 @@ export default function PlayerBar() {
             </p>
             <p className="truncate text-sm font-medium text-white">{radioText}</p>
           </div>
+
+          {/* Ouvintes ao vivo */}
+          {ouvintes > 0 ? (
+            <span
+              title={`${ouvintes} ouvintes agora`}
+              className="hidden items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold tabular-nums text-white sm:flex"
+            >
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+              </span>
+              {ouvintes}
+            </span>
+          ) : null}
 
           {/* Expandir (tela cheia + "Passou na RadioIT") */}
           <button

@@ -62,6 +62,35 @@ export async function assignToPlaylists(sid, relPaths, playlistIds) {
   });
 }
 
+/** Reorder media within a playlist. Takes the playlist id and an array of
+ *  media file ids (AzuraCast internal) in the desired order. Uses the
+ *  playlist/{id}/order endpoint if available, falls back silently. */
+export async function reorderPlaylist(sid, playlistId, mediaIds) {
+  try {
+    await api("PUT", `/station/${sid}/playlist/${playlistId}/order`, mediaIds.map((id, i) => ({ id, weight: i + 1 })));
+  } catch {
+    // Older AzuraCast versions may not have this endpoint — silent fallback
+  }
+}
+
+/** Look up media file details by path. Returns the file object (with .id) or null. */
+export async function getFileByPath(sid, relPath) {
+  try {
+    const files = await api("GET", `/station/${sid}/files/list?searchPhrase=${encodeURIComponent(relPath)}`);
+    return Array.isArray(files) ? files.find((f) => f.path === relPath) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Apaga media (por path) — remove do disco E de TODAS as playlists (cascata do
+ *  AzuraCast). DESTRUTIVO. Usa o batch `do:delete` (mesmo endpoint do assign).
+ *  Refresco in-place, SEM restart (não mexe na agenda/switch). */
+export async function deleteFiles(sid, relPaths) {
+  if (!relPaths.length) return;
+  await api("PUT", `/station/${sid}/files/batch`, { do: "delete", files: relPaths, dir: "" });
+}
+
 /** Reinicia o backend (liquidsoap). SÓ necessário quando a agenda/switch muda
  *  (playlist nova) — refrescar media numa playlist existente é in-place. */
 export const restart = (sid) => api("POST", `/station/${sid}/restart`);

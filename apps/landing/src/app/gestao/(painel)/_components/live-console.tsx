@@ -10,7 +10,7 @@
 // valor determinístico do seam (sem mismatch de hidratação) até ligarmos ao
 // nowplaying + fila do backend.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, StatusChip } from "./ui";
 import Soundboard from "./soundboard";
 import { IconPlay, IconClose, IconGrip, IconTrash, IconAlert } from "./icons";
@@ -27,24 +27,76 @@ const KIND: Record<LiveKind, { label: string; dot: string }> = {
   noticias: { label: "Notícias", dot: "bg-emerald-400" },
 };
 
+const HIST_PAGE = 10;
+
 export default function LiveConsole({ data, pads }: { data: LiveData; pads: (SoundPad | null)[] }) {
-  const [items, setItems] = useState<LiveItem[]>(data.itens);
-  const [nowSec, setNowSec] = useState<number>(data.decorridoInicial);
+  const [histCount, setHistCount] = useState(data.historialVisivel);
+  const fullHist = data.historial;
+  const hasMoreHist = histCount < fullHist.length;
+
+  // Build visible items: N most recent history + current + future
+  const visibleHist = histCount > 0 ? fullHist.slice(-histCount) : [];
+  const futureItems = data.itens.slice(data.historialVisivel);
+  const [futureOverride, setFutureOverride] = useState<LiveItem[] | null>(null);
+  const currentFuture = futureOverride ?? futureItems;
+  const allVisible = [...visibleHist, ...currentFuture];
+
+  // Recompute blocoInicio/decorridoInicial based on visible history
+  const visibleHistDur = visibleHist.reduce((acc, it) => acc + it.duracao, 0);
+  const baseFutureDur = futureItems.length > 0
+    ? Math.max(0, data.decorridoInicial - data.itens.slice(0, data.historialVisivel).reduce((a, it) => a + it.duracao, 0))
+    : 0;
+  const computedDecorrido = visibleHistDur + baseFutureDur;
+
+  const [nowSec, setNowSec] = useState<number>(computedDecorrido);
   const [selected, setSelected] = useState<LiveItem | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
 
-  const blocoInicioSec = parseHHMM(data.blocoInicio);
+  const blocoInicioSec = (() => {
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    return Math.max(0, h * 3600 + m * 60 - computedDecorrido);
+  })();
+  const anchorRef = useRef(Date.now());
 
-  // o "agora" avança em tempo real (arranca de um valor determinístico do seam)
   useEffect(() => {
-    const id = setInterval(() => setNowSec((v) => v + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
+    const anchor = anchorRef.current;
+    const base = computedDecorrido;
 
-  const rows = buildSchedule(items, blocoInicioSec, nowSec);
+    const sync = () => setNowSec(base + Math.floor((Date.now() - anchor) / 1000));
+    const id = setInterval(sync, 1000);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [computedDecorrido]);
+
+  const rows = buildSchedule(allVisible, blocoInicioSec, nowSec);
   const firstScheduledIdx = rows.findIndex((r) => r.estado === "scheduled");
   const restantes = rows.filter((r) => r.estado === "scheduled").length;
+  const playingRef = useRef<HTMLLIElement>(null);
+  const didScrollRef = useRef(false);
+
+  useEffect(() => {
+    if (!didScrollRef.current && playingRef.current) {
+      playingRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+      didScrollRef.current = true;
+    }
+  });
+
+  function loadMoreHistory() {
+    setHistCount((c) => Math.min(c + HIST_PAGE, fullHist.length));
+  }
 
   // reordenação (arrastar) — só entre itens agendados (futuros)
   function canEdit(id: string) {
@@ -54,19 +106,18 @@ export default function LiveConsole({ data, pads }: { data: LiveData; pads: (Sou
   function reorder(targetId: string) {
     if (!dragId || dragId === targetId) return;
     if (!canEdit(dragId) || !canEdit(targetId)) return;
-    setItems((prev) => {
-      const from = prev.findIndex((i) => i.id === dragId);
-      const to = prev.findIndex((i) => i.id === targetId);
-      if (from < 0 || to < 0 || to < firstScheduledIdx) return prev;
-      const next = prev.slice();
-      const [m] = next.splice(from, 1);
-      next.splice(to, 0, m);
-      return next;
-    });
+    const prev = currentFuture;
+    const from = prev.findIndex((i) => i.id === dragId);
+    const to = prev.findIndex((i) => i.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = prev.slice();
+    const [m] = next.splice(from, 1);
+    next.splice(to, 0, m);
+    setFutureOverride(next);
   }
   function removeItem(id: string) {
     if (!canEdit(id)) return;
-    setItems((prev) => prev.filter((i) => i.id !== id));
+    setFutureOverride((currentFuture).filter((i) => i.id !== id));
     setSelected(null);
   }
 
@@ -93,12 +144,22 @@ export default function LiveConsole({ data, pads }: { data: LiveData; pads: (Sou
           <div className="text-right text-xs text-[var(--gray)]">
             <div className="font-medium text-[var(--ink)]">{data.now.programa}</div>
             <div>
-              {restantes} por ir ao ar · arrasta para reordenar
+              {restantes} a seguir · {visibleHist.length} anteriores{hasMoreHist ? ` (de ${fullHist.length})` : ""}
             </div>
           </div>
         </div>
 
         <Card className="p-2 sm:p-3">
+          {hasMoreHist ? (
+            <button
+              type="button"
+              onClick={loadMoreHistory}
+              className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--line)] py-2 text-xs font-semibold text-[var(--gray)] transition-colors hover:border-[var(--ink)]/30 hover:text-[var(--ink)]"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 15l-6-6-6 6" /></svg>
+              Carregar anteriores ({fullHist.length - histCount} restantes)
+            </button>
+          ) : null}
           <ul className="space-y-1.5" onDragOver={(e) => e.preventDefault()}>
             {rows.map((r) => {
               const k = KIND[r.item.kind];
@@ -106,6 +167,7 @@ export default function LiveConsole({ data, pads }: { data: LiveData; pads: (Sou
               return (
                 <li
                   key={r.item.id}
+                  ref={r.estado === "playing" ? playingRef : undefined}
                   draggable={editable}
                   onDragStart={() => setDragId(r.item.id)}
                   onDragEnter={() => {
@@ -200,8 +262,7 @@ export default function LiveConsole({ data, pads }: { data: LiveData; pads: (Sou
 
         <p className="flex items-start gap-2 text-[11px] text-[var(--gray)]">
           <IconAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Demonstração: o alinhamento é simulado. Ao ligar, os itens vêm da fila do backend + grelha, o "agora"
-          do nowplaying, e reordenar/remover escreve na fila (só afeta material que ainda não foi ao ar).
+          Historial + fila reais do AzuraCast. Reordenar/remover ainda não escreve na fila (só leitura).
         </p>
       </div>
 
@@ -230,24 +291,26 @@ function PreviewDrawer({
   onRemove: () => void;
 }) {
   const p = item.preview;
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [prog, setProg] = useState(0);
   const k = KIND[item.kind];
   const removivel = estado === "scheduled";
 
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      setProg((v) => {
-        if (v >= 100) {
-          setPlaying(false);
-          return 100;
-        }
-        return v + 2;
+  function togglePlay(filePath: string) {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(`/api/gestao/audio?path=${encodeURIComponent(filePath)}`);
+      audioRef.current.addEventListener("timeupdate", () => {
+        const a = audioRef.current;
+        if (a && a.duration) setProg((a.currentTime / a.duration) * 100);
       });
-    }, 120);
-    return () => clearInterval(id);
-  }, [playing]);
+      audioRef.current.addEventListener("ended", () => { setPlaying(false); setProg(0); });
+    }
+    if (playing) { audioRef.current.pause(); setPlaying(false); }
+    else { audioRef.current.play(); setPlaying(true); }
+  }
+
+  useEffect(() => () => { audioRef.current?.pause(); audioRef.current = null; }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -313,7 +376,7 @@ function PreviewDrawer({
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setPlaying((v) => !v)}
+                    onClick={() => togglePlay(p.corpo)}
                     className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ink)] text-white transition-transform hover:scale-105"
                     aria-label={playing ? "Pausar" : "Reproduzir"}
                   >
