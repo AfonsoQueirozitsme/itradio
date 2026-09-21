@@ -292,9 +292,9 @@ async function getBedrockClient() {
   try {
     const mod = await import("@anthropic-ai/bedrock-sdk");
     const AnthropicBedrock = mod.default || mod.AnthropicBedrock;
-    _BedrockClient = new AnthropicBedrock({
-      awsRegion: process.env.AWS_REGION || "eu-west-1",
-    });
+    const opts = { awsRegion: process.env.AWS_REGION || "eu-west-3" };
+    if (process.env.AWS_SESSION_TOKEN) opts.awsSessionToken = process.env.AWS_SESSION_TOKEN;
+    _BedrockClient = new AnthropicBedrock(opts);
     return _BedrockClient;
   } catch {
     _bedrockImportFailed = true;
