@@ -63,7 +63,7 @@ async function curateWithAI(candidates, prog, target) {
     `${i + 1}. "${t.title}" — ${t.artist} (${t.dur ? Math.round(t.dur) + "s" : "?"})`
   ).join("\n");
 
-  const prompt = `És o diretor musical da rádio IT.FM. Tens de selecionar as ${target} melhores faixas para o programa "${prog.nome}" (${prog.inicio}h–${prog.fim}h, apresentador: ${prog.locutor}).
+  const prompt = `És o diretor musical da rádio IT.FM. Tens de selecionar e ORDENAR as ${target} melhores faixas para o programa "${prog.nome}" (${prog.inicio}h–${prog.fim}h, apresentador: ${prog.locutor}).
 
 VIBE DO PROGRAMA:
 ${prog.vibe || prog.ytGenre}
@@ -78,7 +78,13 @@ CRITÉRIOS DE SELEÇÃO:
 - Descarta compilações, mixes, "best of", podcasts, ASMR, ou conteúdo não-musical
 - Descarta faixas que claramente não encaixam no género (ex: metal num programa chill)
 
-Responde APENAS com um JSON array dos NÚMEROS das faixas selecionadas, por ordem de melhor encaixe. Exemplo: [3, 7, 1, 12, ...]
+CRITÉRIOS DE ORDENAÇÃO (a ordem no array É a ordem de emissão):
+- Curva de energia: começa suave (warm-up), sobe gradualmente até ao pico (~60-70% do set), depois desce (cool-down)
+- Agrupa faixas com BPM/energia semelhante para transições suaves
+- Alterna artistas (nunca dois do mesmo seguidos)
+- A primeira faixa deve ser acessível e convidativa; a última deve fechar o bloco com calma
+
+Responde APENAS com um JSON array dos NÚMEROS das faixas, na ordem de emissão. Exemplo: [3, 7, 1, 12, ...]
 Seleciona exatamente ${target} faixas.`;
 
   try {

@@ -30,7 +30,7 @@ export const PROGRAMS = [
     vibe: "Manhã energética de commute. Faixas feel-good, pop-rock acessível, indie animado. O ouvinte está a acordar e a ir para o trabalho — quer energia positiva sem ser agressivo.",
     ytGenre: "Feel Good", ytGenreAlts: ["Pop", "Energy Boosters", "Commute"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
-    djMode: false,
+    djMode: true,
   },
   {
     dir: "CtrlAltRitmo_SofiaMartins", nome: "Ctrl+Alt+Ritmo", locutor: "Sofia Martins", slug: "sofia_martins",
@@ -49,7 +49,7 @@ export const PROGRAMS = [
     ytGenre: "Rap Tuga Underground",
     ytGenreAlts: ["Hip Hop Tuga Underground", "Rap Português Underground", "Boom Bap Português", "Hip Hop Tuga"],
     poolSize: 10, poolCap: 30, minDur: 120, maxDur: 360,
-    djMode: false,
+    djMode: true,
   },
   {
     dir: "Pause&Play_TomasRocha", nome: "Pause & Play", locutor: "Tomás Rocha", slug: "tomas_rocha",
@@ -57,7 +57,7 @@ export const PROGRAMS = [
     vibe: "Tarde relaxada, indie & alternative. Faixas com personalidade: indie rock, dream pop, shoegaze acessível, alt-pop. O ouvinte está a trabalhar com fones — quer descobertas sem choques. Nada pesado nem demasiado pop genérico.",
     ytGenre: "Indie & Alternative", ytGenreAlts: ["Chill", "Indie", "Focus"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
-    djMode: false,
+    djMode: true,
   },
   {
     dir: "HoraDePonta_BeatrizLima", nome: "Hora de Ponta", locutor: "Beatriz Lima", slug: "beatriz_lima",
