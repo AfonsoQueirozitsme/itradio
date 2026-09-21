@@ -76,6 +76,7 @@ CRITÉRIOS DE SELEÇÃO:
 - Qualidade e reconhecimento da faixa (prefere originais a covers/remixes obscuros)
 - Variedade de artistas (evita repetir o mesmo artista)
 - Descarta compilações, mixes, "best of", podcasts, ASMR, ou conteúdo não-musical
+- REJEITA SEMPRE música gerada por AI (Suno, Udio, ShadowTuga, canais "AI Music", títulos com "AI generated/cover/remix"). Isto é uma rádio profissional — só música REAL de artistas reais
 - Descarta faixas que claramente não encaixam no género (ex: metal num programa chill)
 
 CRITÉRIOS DE ORDENAÇÃO (a ordem no array É a ordem de emissão):
