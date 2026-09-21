@@ -305,46 +305,54 @@ async function getBedrockClient() {
 function buildAIPrompt(items, { hourLisbon, charBudget }) {
   const part = daypart(hourLisbon);
   const greet = GREETING[part];
-  const headlines = items.map((it, i) => {
-    let entry = `${i + 1}. [${it.source}] ${it.title}`;
+  const rss = items.map((it, i) => {
+    let entry = `- [${it.source}] ${it.title}`;
     if (it.hasBody && it.summary) entry += ` — ${it.summary}`;
     return entry;
   }).join("\n");
 
-  return `Es um argumentista de rádio portuguesa. Escreve um guião de boletim de notícias curto para a estação IT.FM, em português de Portugal (pt-PT), para dois co-apresentadores:
-- RUBEN: Ruben Mateus (voz masculina)
-- MARIANA: Mariana Serrano (voz feminina)
+  return `Com base neste RSS gera-me 5 manchetes em formato script de rádio para a IT.FM, em português de Portugal (pt-PT).
+Dois co-apresentadores: RUBEN (Ruben Mateus, voz masculina) e MARIANA (Mariana Serrano, voz feminina).
+Parte do dia: ${part} (saudação: "${greet}"). Orçamento MÁXIMO: ~${charBudget} caracteres no total.
 
-Parte do dia: ${part} (saudação: "${greet}")
+RSS:
+${rss}
 
-Manchetes disponíveis:
-${headlines}
+A tua resposta pode apenas ter o seguinte formato:
+[EFEITO SONORO / BUMPER DE ABERTURA - NOTÍCIAS]
+0. [INTRODUÇÃO]
+---
+1. [TÓPICO 1]
+----
+2. [TÓPICO 2]
+-----
+3. [TÓPICO 3]
+------
+4. [TÓPICO 4]
+-------
+5. [TÓPICO 5]
+--------
+6. [CONCLUSÃO]
 
 REGRAS:
-1. Começa com uma saudação do Ruben: "${greet}, está a ouvir a IT.FM..." (adapta naturalmente)
-2. Alterna as notícias entre RUBEN e MARIANA (3-5 manchetes), num estilo conversacional de rádio
-3. Usa conectores naturais entre manchetes (entretanto, por outro lado, ainda em destaque...)
-4. Termina com um fecho da voz que NÃO leu a última manchete: "Foram as notícias..." ou similar
-5. Orçamento MÁXIMO: ~${charBudget} caracteres no total (soma de todo o texto)
-6. NÃO inventes factos — usa apenas o que está nas manchetes
-7. O texto será lido por TTS, por isso deve soar natural quando falado
+- Cada secção numerada deve ter o formato [RUBEN] ou [MARIANA] seguido do texto, alternando entre os dois
+- A introdução (0) é sempre [RUBEN] com saudação "${greet}, está a ouvir a IT.FM..."
+- A conclusão (6) é da voz que NÃO leu o último tópico: "Foram as notícias da IT.FM..."
+- NÃO inventes factos — usa apenas o que está no RSS
+- O texto será lido por TTS, deve soar natural quando falado
+- Se houver menos de 5 manchetes no RSS, adapta (menos tópicos)
 
-FORMATO DE SAÍDA (obrigatório, uma linha por segmento):
-[RUBEN] texto do segmento
-[MARIANA] texto do segmento
-[RUBEN] texto do segmento
-...
-
-Responde APENAS com as linhas [RUBEN]/[MARIANA], sem comentários adicionais.`;
+Responde APENAS com o script, sem comentários adicionais.`;
 }
 
 function parseAIResponse(text, voiceA, voiceB) {
   const lines = text.trim().split("\n").filter((l) => l.trim());
   const segments = [];
   for (const line of lines) {
-    const m = line.match(/^\[(?:RUBEN|MARIANA)\]\s*(.+)$/i);
+    // Match [RUBEN] or [MARIANA] lines (with optional number prefix like "0. " or "1. ")
+    const m = line.match(/^(?:\d+\.\s*)?\[(?:RUBEN|MARIANA)\]\s*(.+)$/i);
     if (!m) continue;
-    const isRuben = /^\[RUBEN\]/i.test(line);
+    const isRuben = /\[RUBEN\]/i.test(line);
     segments.push({
       voice: isRuben ? voiceA : voiceB,
       text: fixForTTS(m[1].trim()),
@@ -362,7 +370,7 @@ function parseAIResponse(text, voiceA, voiceB) {
  */
 export async function assembleScriptAI(items, opts = {}) {
   const { hourLisbon = 9, voiceA = "A", voiceB = "B", charBudget = 700 } = opts;
-  const model = process.env.NEWS_AI_MODEL || "anthropic.claude-sonnet-4-20250514";
+  const model = process.env.NEWS_AI_MODEL || "anthropic.claude-haiku-4-5-20251001";
 
   const client = await getBedrockClient();
   if (!client) return null;

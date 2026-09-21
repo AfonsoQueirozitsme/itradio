@@ -16,6 +16,7 @@
 import {
   getNewsState,
   getMusicManifest,
+  readStationFile,
   readStationFileHead,
   relativeFromNow,
   statStationFile,
@@ -23,7 +24,11 @@ import {
   lisbonDateISO,
   addDaysISO,
   pad2,
+  toLisbonClock,
+  toLisbonStamp,
   type LisbonClock,
+  type MusicManifest,
+  type NewsState,
 } from "./azuracast-read";
 
 export type JobState = "concluido" | "a_correr" | "agendado" | "falhou";
@@ -335,14 +340,10 @@ function buildWeek(now: LisbonClock, signals: RealSignals): CalDay[] {
     days.push({ weekday: PT_WEEKDAYS[wd] ?? "?", dia: dm, hoje: isToday, ocorrencias });
   }
 
-  // Se temos sinal real de news hoje, marca a última ocorrência passada como
-  // "concluido" explicitamente (o sinal confirma que o job correu). Se o sinal
-  // NÃO existe para a hora corrente (dentro de ~15 min após a hora agendada),
-  // essa ocorrência fica "a_correr" em vez de "concluido".
-  if (signals.newsRanTodayAt) {
-    const todayDay = days.find((d) => d.hoje);
-    if (todayDay) {
-      // Encontra a hora do sinal no horário de Lisboa
+  const todayDay = days.find((d) => d.hoje);
+  if (todayDay) {
+    // ── News: marca ocorrências com sinal real ou "a_correr" na janela ──
+    if (signals.newsRanTodayAt) {
       const signalClock = new Intl.DateTimeFormat("en-GB", {
         timeZone: "Europe/Lisbon",
         hour: "2-digit",
@@ -350,7 +351,6 @@ function buildWeek(now: LisbonClock, signals: RealSignals): CalDay[] {
       }).format(new Date(signals.newsRanTodayAt));
       const signalHour = Number(signalClock);
 
-      // A ocorrência de news mais recente cujo sinal confirma
       const newsOccs = todayDay.ocorrencias.filter((o) => o.jobKey === "news-generate");
       for (const occ of newsOccs) {
         const occHour = Number(occ.hora.split(":")[0]);
@@ -359,13 +359,9 @@ function buildWeek(now: LisbonClock, signals: RealSignals): CalDay[] {
         }
       }
 
-      // Se existe uma ocorrência de news cuja hora JA PASSOU mas cujo sinal
-      // de hora exacta nao bate (i.e. entre a hora agendada e a hora agendada
-      // +15 min, e o sinal nao cobriu esta hora), marca como "a_correr".
       for (const occ of newsOccs) {
         const occHour = Number(occ.hora.split(":")[0]);
         const occMin = occHour * 60 + NEWS_MINUTE;
-        // Janela: se estamos dentro de 15 min apos a hora e o sinal nao cobre
         if (
           now.minutesOfDay >= occMin &&
           now.minutesOfDay < occMin + 15 &&
@@ -373,6 +369,32 @@ function buildWeek(now: LisbonClock, signals: RealSignals): CalDay[] {
         ) {
           occ.estado = "a_correr";
         }
+      }
+    } else {
+      // Sem sinal nenhum: se estamos dentro de 15 min após uma hora agendada,
+      // assume "a_correr" (geração pode estar a decorrer).
+      const newsOccs = todayDay.ocorrencias.filter((o) => o.jobKey === "news-generate");
+      for (const occ of newsOccs) {
+        const occHour = Number(occ.hora.split(":")[0]);
+        const occMin = occHour * 60 + NEWS_MINUTE;
+        if (now.minutesOfDay >= occMin && now.minutesOfDay < occMin + 15) {
+          occ.estado = "a_correr";
+        }
+      }
+    }
+
+    // ── Music: marca "a_correr" se estamos dentro de 2h após 05:00 sem sinal ──
+    const musicOcc = todayDay.ocorrencias.find((o) => o.jobKey === "music-daily-refresh");
+    if (musicOcc) {
+      const musicMin = MUSIC_HOUR * 60 + MUSIC_MINUTE;
+      if (signals.musicRanTodayAt) {
+        // Sinal real confirma conclusão
+        if (now.minutesOfDay >= musicMin) {
+          musicOcc.estado = "concluido";
+        }
+      } else if (now.minutesOfDay >= musicMin && now.minutesOfDay < musicMin + 120) {
+        // Dentro de 2h após a hora (refresh leva ~2h), sem sinal → a_correr
+        musicOcc.estado = "a_correr";
       }
     }
   }
@@ -392,37 +414,146 @@ function buildResumo(week: CalDay[]): JobsData["resumo"] {
   };
 }
 
-// ── Execuções (histórico + a decorrer + agendadas) ──────────────────────────
-const RUNS: JobRun[] = [
-  {
-    id: "run-deploy-tarde",
-    jobKey: "music-deploy",
-    nome: "Deploy de pool · Pause & Play",
-    estado: "a_correr",
-    gatilho: "manual",
-    inicio: "hoje 14:02:03",
-    fim: null,
-    duracao: null,
-    pedido: [
-      { label: "Programa", valor: "Pause & Play (tomas_rocha)" },
-      { label: "Faixas novas", valor: "6" },
-      { label: "Teto (poolCap)", valor: "60" },
-      { label: "Modo", valor: "--yes (aplicar)" },
-    ],
-    resultado: null,
-    passos: [
-      { label: "Upload das 6 faixas novas", estado: "concluido", detalhe: "in-place · md5 verificado" },
-      { label: "Atribuir à playlist 'Música Pause & Play'", estado: "a_correr" },
-      { label: "Rotação com teto (retirar 6 antigas)", estado: "pendente" },
-      { label: "Concluir (sem restart)", estado: "pendente" },
-    ],
-    log: [
-      "14:02:03  deploy tomas_rocha — manifest: 60 faixas",
-      "14:02:05  upload 1/6  heat-waves.mp3  ok",
-      "14:02:07  upload 6/6  the-less-i-know.mp3  ok",
-      "14:02:08  assign → playlist 'Música Pause & Play' …",
-    ],
-  },
+// ── Execuções — construídas a partir de sinais reais + agendadas previstas ──
+// As runs são DINÂMICAS: construídas a partir de news-state.json (última geração),
+// manifest.json (último refresh) e .daily.log (se existir), mais as PRÓXIMAS
+// ocorrências agendadas de cada job. O MOCK só é usado como fallback total.
+
+function buildRealRuns(
+  news: { hash?: string; at?: string; count?: number; totalChars?: number } | null,
+  manifest: { updatedAt?: string; music?: Record<string, string[]>; tracks?: Record<string, unknown> } | null,
+  dailyLog: string | null,
+  now: LisbonClock,
+): JobRun[] {
+  const runs: JobRun[] = [];
+
+  // 1. Última geração de notícias (real de news-state.json)
+  if (news?.at) {
+    const atDate = new Date(news.at);
+    const newsLisbonStamp = toLisbonStamp(atDate);
+    const newsLisbonClock = toLisbonClock(atDate);
+    const newsHour = Number(newsLisbonClock.split(":")[0]);
+    const diffMin = Math.round((now.ms - atDate.getTime()) / 60000);
+    const durLabel = diffMin < 2 ? "<1 min" : diffMin < 60 ? `~${diffMin} min` : null;
+
+    runs.push({
+      id: `news-real-${news.hash ?? "last"}`,
+      jobKey: "news-generate",
+      nome: `Notícias LIVE · ${newsLisbonClock}`,
+      estado: "concluido",
+      gatilho: "launchd (auto)",
+      inicio: newsLisbonStamp,
+      fim: newsLisbonStamp,
+      duracao: durLabel,
+      pedido: [
+        { label: "Feeds", valor: "RTP País/Mundo/Economia/Desporto/Cultura + Euronews" },
+        { label: "Manchetes", valor: `top ${news.count ?? "?"} · orçamento ~700 car.` },
+        { label: "Vozes", valor: "Ruben Mateus + Mariana Serrano" },
+      ],
+      resultado: [
+        { label: "Manchetes", valor: String(news.count ?? "?") },
+        { label: "Caracteres", valor: String(news.totalChars ?? "?") },
+        { label: "Loudness", valor: "-16.0 LUFS" },
+        { label: "Ficheiro", valor: "programas/noticias_live.mp3 (in-place)" },
+      ],
+      passos: [
+        { label: "Buscar feeds RSS", estado: "concluido" },
+        { label: "Montar guião", estado: "concluido", detalhe: `${news.count ?? "?"} manchetes` },
+        { label: "TTS 2 vozes + mistura na bed", estado: "concluido" },
+        { label: "Normalizar -16 LUFS + upload in-place", estado: "concluido" },
+      ],
+      log: [
+        `${newsLisbonClock}  generate — gate GEN_HOURS ok (${newsHour}h)`,
+        `${newsLisbonClock}  ${news.count ?? "?"} manchetes · ${news.totalChars ?? "?"} car.`,
+        `${newsLisbonClock}  concluído`,
+      ],
+    });
+  }
+
+  // 2. Último refresh de música (real de manifest.json)
+  if (manifest?.updatedAt) {
+    const mDate = new Date(manifest.updatedAt);
+    const mStamp = toLisbonStamp(mDate);
+    const slugs = manifest.music ? Object.keys(manifest.music) : [];
+    const totalTracks = manifest.music
+      ? Object.values(manifest.music).reduce((a, arr) => a + (Array.isArray(arr) ? arr.length : 0), 0)
+      : 0;
+
+    const logLines: string[] = [];
+    if (dailyLog) {
+      const lines = dailyLog.split("\n").filter(Boolean);
+      logLines.push(...lines.slice(-10));
+    } else {
+      logLines.push(`${mStamp}  daily-refresh — ${slugs.length} programas`);
+      logLines.push(`${mStamp}  concluído — ${totalTracks} faixas total`);
+    }
+
+    runs.push({
+      id: `music-real-${manifest.updatedAt}`,
+      jobKey: "music-daily-refresh",
+      nome: "Refresh diário da música",
+      estado: "concluido",
+      gatilho: "systemd (auto)",
+      inicio: mStamp,
+      fim: mStamp,
+      duracao: null,
+      pedido: [
+        { label: "Programas", valor: `${slugs.length} (ordem de janela)` },
+        { label: "Alvo", valor: "AzuraCast localhost · in-place" },
+      ],
+      resultado: [
+        { label: "Programas", valor: `${slugs.length}` },
+        { label: "Faixas total", valor: String(totalTracks) },
+        { label: "Restart", valor: "não (refresco in-place)" },
+      ],
+      passos: slugs.map((s) => ({
+        label: `${s} · build+deploy`,
+        estado: "concluido" as const,
+        detalhe: `${manifest.music?.[s]?.length ?? 0} faixas`,
+      })),
+      log: logLines,
+    });
+  }
+
+  // 3. Próximas ocorrências agendadas (news-generate)
+  const nextNewsHour = NEWS_HOURS.find((h) => h * 60 + NEWS_MINUTE > now.minutesOfDay);
+  if (nextNewsHour !== undefined) {
+    runs.push({
+      id: `news-next-${nextNewsHour}`,
+      jobKey: "news-generate",
+      nome: `Notícias LIVE · ${pad2(nextNewsHour)}:${pad2(NEWS_MINUTE)}`,
+      estado: "agendado",
+      gatilho: "launchd (auto)",
+      inicio: `hoje ${pad2(nextNewsHour)}:${pad2(NEWS_MINUTE)} (previsto)`,
+      fim: null,
+      duracao: null,
+      pedido: [
+        { label: "Gate", valor: `GEN_HOURS ${NEWS_HOURS.join("·")} (Lisboa)` },
+        { label: "Feeds", valor: "6 RSS pt-PT" },
+        { label: "Manchetes", valor: "top 5 · ~700 car." },
+        { label: "Guarda de quota", valor: "salta se EL < necessário + 50" },
+      ],
+      resultado: null,
+      passos: [
+        { label: `Aguardar janela ${pad2(nextNewsHour)}:${pad2(NEWS_MINUTE)}`, estado: "pendente" },
+        { label: "Buscar feeds + montar guião", estado: "pendente" },
+        { label: "TTS + normalizar + upload", estado: "pendente" },
+      ],
+      log: [`(agendado para as ${pad2(nextNewsHour)}:${pad2(NEWS_MINUTE)} · launchd)`],
+    });
+  }
+
+  // Ordena: a_correr primeiro, agendados último, mais recentes primeiro para o resto
+  runs.sort((a, b) => {
+    const order: Record<JobState, number> = { a_correr: 0, agendado: 3, concluido: 1, falhou: 2 };
+    return (order[a.estado] ?? 1) - (order[b.estado] ?? 1);
+  });
+
+  return runs;
+}
+
+// MOCK fallback — usado quando não há sinais reais nenhuns.
+const MOCK_RUNS: JobRun[] = [
   {
     id: "news-3-13",
     jobKey: "news-generate",
@@ -457,93 +588,6 @@ const RUNS: JobRun[] = [
       "13:05:30  loudnorm -16 LUFS · 192k",
       "13:05:35  upload programas/noticias_live.mp3 ok (sem restart)",
     ],
-  },
-  {
-    id: "music-3-05",
-    jobKey: "music-daily-refresh",
-    nome: "Refresh diário da música",
-    estado: "concluido",
-    gatilho: "systemd (auto)",
-    inicio: "hoje 05:03:00",
-    fim: "hoje 07:01:12",
-    duracao: "1h58",
-    pedido: [
-      { label: "Programas", valor: "6 (ordem de janela)" },
-      { label: "Alvo", valor: "AzuraCast localhost · in-place" },
-    ],
-    resultado: [
-      { label: "Programas ok", valor: "6 / 6" },
-      { label: "Falhas", valor: "0" },
-      { label: "Faixas novas", valor: "36" },
-      { label: "Restart", valor: "não (refresco in-place)" },
-    ],
-    passos: [
-      { label: "Boot Matinal · build+deploy", estado: "concluido" },
-      { label: "Ctrl+Alt+Ritmo · build+deploy", estado: "concluido" },
-      { label: "Tuga Underground · build+deploy", estado: "concluido" },
-      { label: "Pause & Play · build+deploy", estado: "concluido" },
-      { label: "Hora de Ponta · build+deploy", estado: "concluido" },
-      { label: "Modo Noturno · build+deploy", estado: "concluido" },
-    ],
-    log: [
-      "05:03:00  daily-refresh — 6 programas",
-      "05:41:00  goncalo_pires build: 3 downloads falharam (oversample cobriu)",
-      "07:01:12  concluído — 6 ok, 0 falhas",
-    ],
-  },
-  {
-    id: "run-build-noite",
-    jobKey: "music-build",
-    nome: "Build de pool · Modo Noturno",
-    estado: "falhou",
-    gatilho: "sub-job (refresh)",
-    inicio: "hoje 05:41:02",
-    fim: "hoje 05:49:40",
-    duracao: "8m38",
-    pedido: [
-      { label: "Programa", valor: "Modo Noturno (goncalo_pires)" },
-      { label: "Género", valor: "R&B & soul / chill" },
-      { label: "Alvo", valor: "poolSize 12 novas" },
-    ],
-    resultado: [
-      { label: "Baixadas", valor: "9 / 12" },
-      { label: "Falhas", valor: "3 (edge morto)" },
-      { label: "Impacto", valor: "pool manteve tamanho (oversample)" },
-    ],
-    passos: [
-      { label: "Selecionar trending (ytmusicapi)", estado: "concluido", detalhe: "12 candidatos" },
-      { label: "Download yt-dlp", estado: "falhou", detalhe: "3× HTTP 403 / edge morto" },
-      { label: "Normalizar -16 LUFS", estado: "concluido", detalhe: "9 faixas" },
-    ],
-    log: [
-      "05:41:02  build goncalo_pires — 12 candidatos",
-      "05:44:10  ERRO yt-dlp: 403 (candidato 4)",
-      "05:46:22  ERRO yt-dlp: edge morto (candidato 7)",
-      "05:49:40  build terminou com 9/12 (oversample cobriu o teto)",
-    ],
-  },
-  {
-    id: "news-3-16",
-    jobKey: "news-generate",
-    nome: "Notícias LIVE · 16:05",
-    estado: "agendado",
-    gatilho: "launchd (auto)",
-    inicio: "hoje 16:05 (previsto)",
-    fim: null,
-    duracao: null,
-    pedido: [
-      { label: "Gate", valor: "GEN_HOURS 07·10·13·16·19·22 (Lisboa)" },
-      { label: "Feeds", valor: "6 RSS pt-PT" },
-      { label: "Manchetes", valor: "top 5 · ~700 car." },
-      { label: "Guarda de quota", valor: "salta se EL < necessário + 50" },
-    ],
-    resultado: null,
-    passos: [
-      { label: "Aguardar janela 16:05", estado: "pendente" },
-      { label: "Buscar feeds + montar guião", estado: "pendente" },
-      { label: "TTS + normalizar + upload", estado: "pendente" },
-    ],
-    log: ["(ainda não corário — agendado para as 16:05 · launchd)"],
   },
 ];
 
@@ -671,28 +715,25 @@ def collect(genre, alts, n, country="PT"):
 ];
 
 // MOCK parcial: week e resumo são agora computados dinamicamente em
-// getJobsData(); runs e scripts mantêm-se MOCK até à Fase B.
+// getJobsData(); runs são construídas a partir de sinais reais quando possível.
 const MOCK_PARTIAL = {
   jobs: JOBS,
-  runs: RUNS,
   scripts: SCRIPTS,
 };
 
 export async function getJobsData(): Promise<JobsData> {
-  // Ligação PARCIAL → REAL para week/resumo/jobs; runs e scripts parciais.
+  // Ligação REAL para week/resumo/jobs/runs; scripts parciais.
   //   • week + resumo → computados dinamicamente a partir do relógio de Lisboa
-  //     e das definições dos JOBS agendados; o sinal real (news-state.json mtime,
-  //     manifest.json updatedAt) marca as últimas ocorrências como confirmadas.
-  //   • scripts.conteudo → excerto da cabeça do ficheiro do apps/station (código
-  //     /config de repo PÚBLICO — nunca .env; .rotation.json é estado, não segredo).
-  //   • jobs[].ultimaExec/Estado → só news-generate (build/news-state.json) e
-  //     music-daily-refresh (build-music/manifest.json → updatedAt). Os outros
-  //     jobs ficam no MOCK.
-  //   • runs → aguardam a FASE B (run-log dos scripts + journald).
-  const [news, manifest, newsFileStat] = await Promise.all([
+  //     e das definições dos JOBS agendados.
+  //   • runs → construídas a partir de sinais reais (news-state.json, manifest.json,
+  //     .daily.log) + próximas ocorrências agendadas. MOCK só se não há sinais.
+  //   • scripts.conteudo → excerto da cabeça do ficheiro do apps/station.
+  //   • jobs[].ultimaExec/Estado → news-generate e music-daily-refresh reais.
+  const [news, manifest, newsFileStat, dailyLog] = await Promise.all([
     getNewsState(),
     getMusicManifest(),
     statStationFile("build/news-state.json"),
+    readStationFile("music/.daily.log"),
   ]);
 
   // ── scripts — sobrepõe SÓ `conteudo` com a cabeça real do ficheiro; qualquer
@@ -745,5 +786,9 @@ export async function getJobsData(): Promise<JobsData> {
   const week = buildWeek(now, { newsRanTodayAt, musicRanTodayAt });
   const resumo = buildResumo(week);
 
-  return { resumo, jobs, week, runs: MOCK_PARTIAL.runs, scripts };
+  // Runs: construídas a partir de sinais reais; fallback ao MOCK se vazias.
+  const realRuns = buildRealRuns(news, manifest, dailyLog, now);
+  const runs = realRuns.length > 0 ? realRuns : MOCK_RUNS;
+
+  return { resumo, jobs, week, runs, scripts };
 }

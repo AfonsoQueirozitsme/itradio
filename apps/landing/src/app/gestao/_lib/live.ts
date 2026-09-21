@@ -235,8 +235,23 @@ const faixaDetalhe = (playlist?: string): string => (playlist ? `pool ${playlist
 const faixaFonte = (playlist?: string): string =>
   playlist ? `AzuraCast · ${playlist}` : "AzuraCast · fila";
 
-function songPreview(song?: AzSong, dur?: number): LivePreview | undefined {
+function songPreview(song?: AzSong, dur?: number, playlist?: string): LivePreview | undefined {
   if (!song) return undefined;
+
+  // Try to derive an audio-playable path. AzuraCast returns a `path` field on
+  // queue/history items (e.g. "musica/tomas_rocha/heat-waves.mp3"); `id` can also
+  // be a relative path. Either can be served by the audio proxy which searches
+  // the station dir + AzuraCast media dir.
+  const audioExt = /\.(mp3|ogg|flac|m4a|wav|aac|opus)$/i;
+  const songPath = song.path ?? "";
+  const songId = song.id ?? "";
+  const derivedPath = audioExt.test(songPath) ? songPath : audioExt.test(songId) ? songId : null;
+  if (derivedPath) {
+    const meta = dur ? fmtDurHelper(dur) : undefined;
+    return { tipo: "audio", corpo: derivedPath, meta };
+  }
+
+  // Fallback: text-only preview with song metadata
   const lines: string[] = [];
   if (song.artist) lines.push(`Artista: ${song.artist}`);
   if (song.title) lines.push(`Título: ${song.title}`);
@@ -263,7 +278,7 @@ function spinToItem(spin: AzSpin, id: string): LiveItem {
     detalhe: faixaDetalhe(spin.playlist),
     duracao: dur,
     fonte: faixaFonte(spin.playlist),
-    preview: songPreview(spin.song, dur),
+    preview: songPreview(spin.song, dur, spin.playlist),
   };
 }
 
@@ -277,7 +292,7 @@ function queueToItem(q: AzQueueItem, idx: number): LiveItem {
     detalhe: faixaDetalhe(q.playlist),
     duracao: dur,
     fonte: faixaFonte(q.playlist),
-    preview: songPreview(q.song, dur),
+    preview: songPreview(q.song, dur, q.playlist),
   };
 }
 
@@ -291,7 +306,7 @@ function historyToItem(spin: AzSpin, idx: number): LiveItem {
     detalhe: faixaDetalhe(spin.playlist),
     duracao: dur,
     fonte: faixaFonte(spin.playlist),
-    preview: songPreview(spin.song, dur),
+    preview: songPreview(spin.song, dur, spin.playlist),
   };
 }
 

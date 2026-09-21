@@ -10,11 +10,15 @@
 #   - o BED "Breaking News" entra por baixo (20%) e faz fade, acabando ~1s
 #     depois do segmento.
 #
-# NOTÍCIAS LIVE (programas/noticias_live.mp3): é um boletim PRÉ-PRODUZIDO
-# (voz + bed já mixados a -16 LUFS), por isso NÃO leva o bed extra nem o +30%;
-# a música desce bem mais (0.18) e o boletim toca por cima, limpo, como um
-# noticiário. O ficheiro é reescrito in-place de 3 em 3h (news-live.mjs) e
-# reaproveitado por replay entre gerações.
+# NOTÍCIAS LIVE: fluxo completo com jingles:
+#   1. Jingle curto de entrada (bumper)
+#   2. Bed de notícias a 10% + voz do noticiário em simultâneo
+#   3. Jingle de saída
+#   4. Restauro gradual da música
+# Usa noticias_voice.mp3 (voz-only, sem bed) se disponível; senão cai no
+# boletim pré-produzido (noticias_live.mp3, retrocompatível). A bed corre
+# em paralelo via bed_queue. Os ficheiros são reescritos in-place de 3 em 3h
+# pelo news-live.mjs e reaproveitados por replay entre gerações.
 #
 # Agendamento próprio (as playlists de segmentos ficam DESATIVADAS no AzuraCast):
 #   - um thread verifica a hora local a cada 2s;
@@ -83,41 +87,62 @@ cross_lpf_freq = 6000.
 cross_hpf_freq = 150.
 
 def dj_crossfade(a, b) =
-  # Read BPM from track metadata (set by AzuraCast tags or music-build).
-  old_bpm_s = list.assoc(default="0", "bpm", a.metadata)
-  new_bpm_s = list.assoc(default="0", "bpm", b.metadata)
-  old_bpm   = float_of_string(default=0., old_bpm_s)
-  new_bpm   = float_of_string(default=0., new_bpm_s)
+  # Detect jingles/sweepers: short tracks (< 20s) or paths containing "jingle"/"sweeper".
+  # These should NOT get a long crossfade — use a quick 0.5s fade instead.
+  old_dur_s = list.assoc(default="0", "duration", a.metadata)
+  new_dur_s = list.assoc(default="0", "duration", b.metadata)
+  old_dur = float_of_string(default=0., old_dur_s)
+  new_dur = float_of_string(default=0., new_dur_s)
+  old_path = list.assoc(default="", "filename", a.metadata)
+  new_path = list.assoc(default="", "filename", b.metadata)
 
-  # Absolute BPM difference — determines transition length.
-  raw_diff = old_bpm - new_bpm
-  bpm_diff = if raw_diff < 0. then 0. - raw_diff else raw_diff end
+  is_short = (old_dur > 0. and old_dur < 20.) or (new_dur > 0. and new_dur < 20.)
+  is_jingle = string.contains(substring="jingle", old_path) or
+              string.contains(substring="jingle", new_path) or
+              string.contains(substring="sweeper", old_path) or
+              string.contains(substring="sweeper", new_path)
 
-  fade_dur =
-    if old_bpm > 1. and new_bpm > 1. then
-      # Both tracks have BPM info — scale overlap by proximity.
-      if bpm_diff < 10. then 8.       # very close BPM → long smooth blend
-      elsif bpm_diff < 30. then 6.    # moderate gap   → standard blend
-      else 4.                          # big gap        → short transition
+  if is_short or is_jingle then
+    log.info(label="itfm_dj",
+      "jingle/short detected (dur=#{old_dur_s}->#{new_dur_s}) — quick cut (0.5s)")
+    a_out = fade.out(duration=0.5, type="lin", a.source)
+    b_in  = fade.in(duration=0.5, type="lin", b.source)
+    add(normalize=false, [a_out, b_in])
+  else
+    # Read BPM from track metadata (set by AzuraCast tags or music-build).
+    old_bpm_s = list.assoc(default="0", "bpm", a.metadata)
+    new_bpm_s = list.assoc(default="0", "bpm", b.metadata)
+    old_bpm   = float_of_string(default=0., old_bpm_s)
+    new_bpm   = float_of_string(default=0., new_bpm_s)
+
+    # Absolute BPM difference — determines transition length.
+    raw_diff = old_bpm - new_bpm
+    bpm_diff = if raw_diff < 0. then 0. - raw_diff else raw_diff end
+
+    fade_dur =
+      if old_bpm > 1. and new_bpm > 1. then
+        if bpm_diff < 10. then 8.
+        elsif bpm_diff < 30. then 6.
+        else 4.
+        end
+      else
+        cross_def_dur()
       end
-    else
-      # No BPM metadata — fall back to configurable default.
-      cross_def_dur()
-    end
 
-  log.info(label="itfm_dj",
-    "crossfade: BPM #{old_bpm_s}->#{new_bpm_s} diff=#{bpm_diff} fade=#{fade_dur}s")
+    log.info(label="itfm_dj",
+      "crossfade: BPM #{old_bpm_s}->#{new_bpm_s} diff=#{bpm_diff} fade=#{fade_dur}s")
 
-  # Outgoing track: sinusoidal fade-out + low-pass to clear competing highs.
-  a_out = fade.out(duration=fade_dur, type="sin", a.source)
-  a_out = filter.iir.butterworth.low(frequency=cross_lpf_freq, order=2, a_out)
+    # Outgoing track: sinusoidal fade-out + low-pass to clear competing highs.
+    a_out = fade.out(duration=fade_dur, type="sin", a.source)
+    a_out = filter.iir.butterworth.low(frequency=cross_lpf_freq, order=2, a_out)
 
-  # Incoming track: sinusoidal fade-in + high-pass to prevent bass mud.
-  b_in = fade.in(duration=fade_dur, type="sin", b.source)
-  b_in = filter.iir.butterworth.high(frequency=cross_hpf_freq, order=2, b_in)
+    # Incoming track: sinusoidal fade-in + high-pass to prevent bass mud.
+    b_in = fade.in(duration=fade_dur, type="sin", b.source)
+    b_in = filter.iir.butterworth.high(frequency=cross_hpf_freq, order=2, b_in)
 
-  # Mix both streams during the overlap.
-  add(normalize=false, [a_out, b_in])
+    # Mix both streams during the overlap.
+    add(normalize=false, [a_out, b_in])
+  end
 end
 
 # Apply DJ crossfade to the music stream. cross() detects track boundaries
@@ -184,19 +209,76 @@ def fire(name) =
   log.important(label="itfm_segments", "fim agendado para +#{dur + 0.2}s")
 end
 
-# Notícias live: boletim pré-produzido (voz+bed a -16). Sem bed extra, sem +30%.
-# Duração lida a cada disparo (o ficheiro muda de 3 em 3h).
+# Notícias live com jingles e bed separada.
+# Fluxo: jingle entrada → bed a 10% + voz → jingle saída → restauro.
+# A voz sem bed (noticias_voice.mp3) é gerada pelo news-live.mjs ao lado do
+# boletim pré-mixado. Se o ficheiro voice-only não existir, cai no boletim
+# pré-produzido antigo (retrocompatível).
+#
+# Jingles: usa jingle_news_in/out.mp3 se existirem, senão jingle_1.mp3.
+def news_jingle_in() =
+  p = "#{MEDIA}/jingles/jingle_news_in.mp3"
+  if file.exists(p) then p else "#{MEDIA}/jingles/jingle_1.mp3" end
+end
+def news_jingle_out() =
+  p = "#{MEDIA}/jingles/jingle_news_out.mp3"
+  if file.exists(p) then p else "#{MEDIA}/jingles/jingle_1.mp3" end
+end
+def news_jingle_dur(p) =
+  d = request.duration(p) ?? -1.
+  if d > 0. then d else 5. end
+end
+
 def fire_news() =
-  p = "#{MEDIA}/programas/noticias_live.mp3"
+  voice_p = "#{MEDIA}/programas/noticias_voice.mp3"
+  mixed_p = "#{MEDIA}/programas/noticias_live.mp3"
+  has_voice = file.exists(voice_p)
+  p = if has_voice then voice_p else mixed_p end
   dur = request.duration(p) ?? 30.
-  log.important(label="itfm_segments", "INÍCIO noticias dur=#{dur}s music=0.18 (self-bed)")
+
+  jin = news_jingle_in()
+  jout = news_jingle_out()
+  jin_dur = news_jingle_dur(jin)
+  jout_dur = news_jingle_dur(jout)
+  total = jin_dur + dur + jout_dur
+
+  log.important(label="itfm_segments",
+    "INÍCIO noticias: jingle_in=#{jin_dur}s voz=#{dur}s jingle_out=#{jout_dur}s total=#{total}s voice_only=#{has_voice}")
+
+  # 1. Duck music to 10%
+  music_vol := 0.10
   seg_gain := 1.0
-  bed_vol := 0.0
-  music_vol := 0.18
+
+  # 2. Queue: jingle-in → voice/bulletin → jingle-out (FIFO)
+  ignore(seg_q.push(request.create(jin)))
   ignore(seg_q.push(request.create(p)))
-  # Fim do boletim (pela duração): repõe a música.
-  thread.run(delay=dur + 0.3, {restore_music()})
-  log.important(label="itfm_segments", "fim noticias agendado para +#{dur + 0.3}s")
+  ignore(seg_q.push(request.create(jout)))
+
+  # 3. News bed at 10%, starts with the jingle (bed_queue is parallel)
+  if has_voice then
+    bed_vol := 0.10
+    ignore(bed_q.push(request.create("#{MEDIA}/beds/news_bed.mp3")))
+  else
+    # Pre-mixed bulletin already has bed baked in
+    bed_vol := 0.0
+  end
+
+  # 4. Schedule restore after all segments finish
+  # Bed fades out during the outro jingle
+  thread.run(delay=jin_dur + dur + 0.2, {
+    bed_vol := 0.06
+  })
+  thread.run(delay=jin_dur + dur + jout_dur * 0.5, {
+    bed_vol := 0.03
+  })
+  thread.run(delay=total + 0.2, {
+    bed_vol := 0.0
+    bed_q.skip()
+  })
+  # Restore music after everything
+  thread.run(delay=total + 0.5, {restore_music()})
+
+  log.important(label="itfm_segments", "fim noticias agendado para +#{total + 0.5}s")
 end
 
 # --- Agendador (flancos :00 e :30, re-arma diariamente) ---------------------

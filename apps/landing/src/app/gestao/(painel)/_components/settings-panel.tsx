@@ -5,9 +5,9 @@
 // local (SIMULADA) — ao ligar, grava a config de carts com backup no
 // apps/station. Segredos (.env) NUNCA são geridos aqui.
 
-import { useEffect, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { Card, StatusChip } from "./ui";
-import { IconClose, IconTrash, IconGrid, IconGrip, IconAlert, IconCheck } from "./icons";
+import { IconClose, IconTrash, IconGrid, IconGrip, IconAlert, IconCheck, IconPlay, IconFolder, IconUpload } from "./icons";
 import { HOTKEYS, type SettingsData, type SoundPad, type PadKind } from "../../_lib/settings";
 import { loadPads, savePads, swapPads } from "./soundboard-store";
 import FilePicker from "./file-picker";
@@ -30,7 +30,18 @@ const KIND_DOT: Record<PadKind, string> = {
 };
 const KINDS = Object.keys(KIND_LABEL) as PadKind[];
 
+const KIND_DIR: Record<PadKind, string> = {
+  jingle: "audio/jingles",
+  noticias: "audio/segmentos",
+  anuncio: "audio/beds",
+  segmento: "audio/segmentos",
+  efeito: "audio/jingles",
+  musica: "audio/musica",
+};
+
 type Draft = { label: string; kind: PadKind; ficheiro: string; dur: string };
+
+type MediaEntry = { name: string; path: string; size?: number; ext?: string };
 
 export default function SettingsPanel({ data }: { data: SettingsData }) {
   const [pads, setPads] = useState<(SoundPad | null)[]>(data.pads);
@@ -230,6 +241,56 @@ function PadEditor({
   const [dur, setDur] = useState(pad?.dur ?? "0:00");
   const [showFilePicker, setShowFilePicker] = useState(false);
 
+  const [media, setMedia] = useState<MediaEntry[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+
+  const fetchMedia = useCallback(async (dir: string) => {
+    setMediaLoading(true);
+    try {
+      const res = await fetch(`/api/gestao/files?dir=${encodeURIComponent(dir)}`);
+      if (!res.ok) { setMedia([]); return; }
+      const data = await res.json();
+      const audioExts = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".opus"]);
+      const items: MediaEntry[] = (data.entries ?? [])
+        .filter((e: { type: string; ext?: string }) => e.type === "file" && e.ext && audioExts.has(e.ext))
+        .map((e: { name: string; size?: number; ext?: string }) => ({
+          name: e.name,
+          path: dir ? `${dir}/${e.name}` : e.name,
+          size: e.size,
+          ext: e.ext,
+        }));
+      setMedia(items);
+    } catch {
+      setMedia([]);
+    } finally {
+      setMediaLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMedia(KIND_DIR[kind]);
+  }, [kind, fetchMedia]);
+
+  function togglePreview(filePath: string) {
+    if (previewPath === filePath) {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setPreviewPath(null);
+      return;
+    }
+    audioRef.current?.pause();
+    const a = new Audio(`/api/gestao/audio?path=${encodeURIComponent(filePath)}`);
+    a.addEventListener("ended", () => setPreviewPath(null));
+    audioRef.current = a;
+    a.play();
+    setPreviewPath(filePath);
+  }
+
+  useEffect(() => () => { audioRef.current?.pause(); audioRef.current = null; }, []);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -237,6 +298,12 @@ function PadEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
@@ -294,28 +361,165 @@ function PadEditor({
             </div>
           </Field>
 
-          <Field label="Ficheiro" hint="relativo a /home/itradio/itfm-data">
-            <div className="flex gap-2">
-              <input
-                value={ficheiro}
-                onChange={(e) => setFicheiro(e.target.value)}
-                placeholder="ex.: carts/id_pause_play.mp3"
-                className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--card)] px-3 py-2 font-mono text-xs text-[var(--ink)] outline-none focus:border-[var(--ink)]/30"
-              />
-              <button
-                type="button"
-                onClick={() => setShowFilePicker(true)}
-                className="shrink-0 rounded-lg border border-[var(--line)] bg-[var(--bg)] px-3 py-2 text-xs font-medium text-[var(--gray)] transition-colors hover:border-[var(--ink)]/25 hover:text-[var(--ink)]"
-              >
-                Procurar...
-              </button>
-            </div>
+          {/* Ficheiro selecionado */}
+          <Field label="Ficheiro">
+            {ficheiro ? (
+              <div className="flex items-center gap-2 rounded-lg border border-brand/30 bg-brand/5 p-2.5">
+                <button
+                  type="button"
+                  onClick={() => togglePreview(ficheiro)}
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-transform hover:scale-105 ${
+                    previewPath === ficheiro
+                      ? "bg-brand text-[#0b3d1a]"
+                      : "bg-[var(--ink)] text-white"
+                  }`}
+                  aria-label={previewPath === ficheiro ? "Parar" : "Ouvir"}
+                >
+                  {previewPath === ficheiro ? (
+                    <span className="text-xs font-bold">II</span>
+                  ) : (
+                    <IconPlay className="h-4 w-4" />
+                  )}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-semibold text-[var(--ink)]">
+                    {ficheiro.split("/").pop()}
+                  </div>
+                  <div className="truncate font-mono text-[10px] text-[var(--gray)]">{ficheiro}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFicheiro("")}
+                  className="shrink-0 rounded-lg border border-[var(--line)] bg-[var(--bg)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--gray)] transition-colors hover:text-[var(--ink)]"
+                >
+                  Trocar
+                </button>
+              </div>
+            ) : null}
+
+            {/* Media da estação filtrada por tipo */}
+            {!ficheiro ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--gray)]">
+                    Media carregada · {KIND_LABEL[kind]}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowFilePicker(true)}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-[var(--gray)] transition-colors hover:text-[var(--ink)]"
+                  >
+                    <IconFolder className="h-3 w-3" />
+                    Explorar tudo
+                  </button>
+                </div>
+
+                {mediaLoading ? (
+                  <div className="flex items-center justify-center py-6 text-xs text-[var(--gray)]">
+                    A carregar...
+                  </div>
+                ) : media.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-[var(--line)] p-4 text-center text-xs text-[var(--gray)]">
+                    Sem ficheiros em {KIND_DIR[kind]}
+                  </div>
+                ) : (
+                  <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-[var(--line)] bg-[var(--bg)]/40 p-1.5">
+                    {media.map((m) => (
+                      <div
+                        key={m.path}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          setFicheiro(m.path);
+                          if (!label) setLabel(m.name.replace(/\.[^.]+$/, "").replace(/[_-]/g, " "));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setFicheiro(m.path);
+                            if (!label) setLabel(m.name.replace(/\.[^.]+$/, "").replace(/[_-]/g, " "));
+                          }
+                        }}
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[var(--card)]"
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePreview(m.path);
+                          }}
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors ${
+                            previewPath === m.path
+                              ? "bg-brand text-[#0b3d1a]"
+                              : "bg-[var(--card)] text-[var(--gray)] hover:text-[var(--ink)]"
+                          }`}
+                        >
+                          {previewPath === m.path ? (
+                            <span className="text-[9px] font-bold">II</span>
+                          ) : (
+                            <IconPlay className="h-3 w-3" />
+                          )}
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium text-[var(--ink)]">{m.name}</div>
+                          {m.size != null ? (
+                            <div className="text-[10px] text-[var(--gray)]">{formatSize(m.size)}</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Carregar nova media */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowFilePicker(true)}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--line)] py-2.5 text-xs font-semibold text-[var(--gray)] transition-colors hover:border-[var(--ink)]/30 hover:text-[var(--ink)]"
+                  >
+                    <IconFolder className="h-3.5 w-3.5" />
+                    Procurar na estação
+                  </button>
+                  <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--line)] py-2.5 text-xs font-semibold text-[var(--gray)] transition-colors hover:border-[var(--ink)]/30 hover:text-[var(--ink)]">
+                    <IconUpload className="h-3.5 w-3.5" />
+                    Carregar nova
+                    <input
+                      type="file"
+                      accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const form = new FormData();
+                        form.append("file", file);
+                        const dir = KIND_DIR[kind];
+                        try {
+                          const res = await fetch(`/api/gestao/files?dir=${encodeURIComponent(dir)}`, {
+                            method: "POST",
+                            body: form,
+                          });
+                          if (res.ok) {
+                            const data = await res.json();
+                            setFicheiro(data.path);
+                            if (!label) setLabel(file.name.replace(/\.[^.]+$/, "").replace(/[_-]/g, " "));
+                            fetchMedia(dir);
+                          }
+                        } catch { /* silently fail */ }
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : null}
           </Field>
 
           {showFilePicker ? (
             <FilePicker
               onSelect={(path) => {
                 setFicheiro(path);
+                if (!label) setLabel(path.split("/").pop()?.replace(/\.[^.]+$/, "").replace(/[_-]/g, " ") ?? "");
                 setShowFilePicker(false);
               }}
               onClose={() => setShowFilePicker(false)}

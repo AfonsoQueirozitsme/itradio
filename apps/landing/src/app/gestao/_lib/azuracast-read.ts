@@ -87,6 +87,7 @@ export async function azGet<T>(apiPath: string): Promise<T | null> {
 
 export type AzSong = {
   id?: string;
+  path?: string;
   text?: string;
   artist?: string;
   title?: string;

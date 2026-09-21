@@ -28,8 +28,9 @@
  *   --out=PATH  grava uma cópia local do mp3
  *   --stub      não chama o ElevenLabs — sintetiza voz-placeholder (testa o áudio sem gastar quota)
  *   --slot=HH   força a parte-do-dia da saudação (default: hora de Lisboa atual)
- *   --ai-script  usa Claude (AWS Bedrock) para reescrever o guião em estilo rádio
- *                (fallback automático ao builder mecânico se falhar)
+ *   --ai-script  usa Claude (AWS Bedrock) para gerar o guião em estilo rádio
+ *                (ATIVO por defeito; fallback ao builder mecânico se falhar;
+ *                 desativar com NEWS_AI_SCRIPT=0)
  *
  * ENV (host, via apps/station/.env — NUNCA imprimir):
  *   AZURACAST_API_KEY (obrig.), AZURACAST_BASE_URL (def http://localhost),
@@ -85,6 +86,7 @@ const CHAR_BUDGET = intEnv("NEWS_CHAR_BUDGET", 700);
 const WITH_SUMMARY = /^(1|true|yes)$/i.test(process.env.NEWS_WITH_SUMMARY || "");
 
 const MEDIA_PATH = "programas/noticias_live.mp3";
+const VOICE_PATH = "programas/noticias_voice.mp3";
 const PLAYLIST_NAME = "Notícias (live)";
 const STATE = join(__dir, "build", "news-state.json");
 const UA = "Mozilla/5.0 (compatible; ITFM-NewsBot/1.0; +https://itfm.live)";
@@ -314,9 +316,19 @@ async function renderBulletin(segMp3s, outAbs) {
     await w.ff(["-i", w.p("body_norm.wav"), "-filter_complex", fin, "-map", "[out]", "-map_metadata", "-1",
       "-metadata", "title=Notícias", "-metadata", "artist=IT.FM", "-c:a", "libmp3lame", "-b:a", "192k", w.p("out.mp3")]);
 
+    // 6) voice-only: normaliza voice.wav a -16 LUFS e codifica mp3 (sem bed).
+    // O Liquidsoap usa este ficheiro com bed + jingles separados.
+    await w.normToWav("voice.wav", "voice_norm.wav");
+    const finVoice = `[0:a]aresample=44100,aformat=channel_layouts=stereo[b0];[b0]concat=n=1:v=0:a=1,aresample=44100[cc];[cc]alimiter=limit=0.95[out]`;
+    await w.ff(["-i", w.p("voice_norm.wav"), "-filter_complex", finVoice, "-map", "[out]", "-map_metadata", "-1",
+      "-metadata", "title=Notícias (voz)", "-metadata", "artist=IT.FM", "-c:a", "libmp3lame", "-b:a", "192k", w.p("voice_out.mp3")]);
+
     await mkdir(dirname(outAbs), { recursive: true });
     await w.pull("out.mp3", outAbs);
-    return { outAbs, durVoice: D, mode };
+    // voice-only goes next to the mixed version
+    const voiceAbs = join(dirname(outAbs), "noticias_voice.mp3");
+    await w.pull("voice_out.mp3", voiceAbs);
+    return { outAbs, voiceAbs, durVoice: D, mode };
   } finally { await w.cleanup(); }
 }
 
@@ -343,7 +355,8 @@ function lisbonHour() {
 }
 
 // ---------- monta o guião ----------
-const AI_SCRIPT = /^(1|true|yes)$/i.test(process.env.NEWS_AI_SCRIPT || "");
+// AI script is ON by default; set NEWS_AI_SCRIPT=0 to disable
+const AI_SCRIPT = !/^(0|false|no)$/i.test(process.env.NEWS_AI_SCRIPT || "1");
 
 async function buildScript(hourLisbon, { aiScript = false } = {}) {
   const items = await gatherItems();
@@ -455,17 +468,23 @@ async function cmdGenerate(flags) {
   // render
   const outAbs = outCopy || join(__dir, "build", "noticias_live.mp3");
   console.log(`  render (${renderMode() || "auto"}) → ${outAbs}`);
-  const { durVoice, mode } = await renderBulletin(clips, outAbs);
+  const { durVoice, voiceAbs, mode } = await renderBulletin(clips, outAbs);
   const loud = await measureFile(outAbs, mode);
   console.log(`  ✓ boletim: voz ~${durVoice.toFixed(1)}s · I=${loud?.I ?? "?"} LUFS · TP=${loud?.TP ?? "?"} dBTP`);
+  if (voiceAbs) console.log(`  ✓ voice-only: ${voiceAbs}`);
 
   if (dryRun) { console.log("  (dry-run — sem upload)"); return; }
 
   await uploadInPlace(sid, MEDIA_PATH, outAbs);
+  if (voiceAbs) await uploadInPlace(sid, VOICE_PATH, voiceAbs);
   // verifica
   const files = await api("GET", `/station/${sid}/files`);
   const f = files.find((x) => x.path === MEDIA_PATH);
   console.log(`  ✓ upload in-place: ${MEDIA_PATH}${f ? ` (id ${f.id ?? f.unique_id})` : ""} — sem restart`);
+  if (voiceAbs) {
+    const fv = files.find((x) => x.path === VOICE_PATH);
+    console.log(`  ✓ upload in-place: ${VOICE_PATH}${fv ? ` (id ${fv.id ?? fv.unique_id})` : ""} — voz sem bed`);
+  }
   await saveState({ hash, at: new Date().toISOString(), count, totalChars });
 }
 

@@ -10,6 +10,7 @@ import {
   GESTAO_ADMIN_GATE,
   AZ_PROBE_TIMEOUT_MS,
   ITFM_STATION_DIR,
+  ITFM_MEDIA_DIR,
   GESTAO_DEV_BYPASS,
 } from "@/app/gestao/_lib/config";
 
@@ -101,27 +102,43 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 5. Resolve station dir and build absolute path
+  // 5. Resolve file across multiple search roots (station dir subdirs + media dir)
   const stationDir = await resolveStationDir();
-  if (!stationDir) {
-    return new Response("Station directory not found", { status: 404 });
+
+  const searchRoots: string[] = [];
+  if (stationDir) {
+    searchRoots.push(stationDir);
+    searchRoots.push(path.join(stationDir, "build-music"));
+    searchRoots.push(path.join(stationDir, "build"));
+    searchRoots.push(path.join(stationDir, "audio"));
+  }
+  if (ITFM_MEDIA_DIR) searchRoots.push(ITFM_MEDIA_DIR);
+
+  if (searchRoots.length === 0) {
+    return new Response("No search directories available", { status: 404 });
   }
 
-  const absPath = path.resolve(stationDir, relPath);
+  let absPath: string | null = null;
+  let fileStat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+  let containingRoot: string | null = null;
 
-  // Extra guard: resolved path must stay inside station dir
-  if (!absPath.startsWith(stationDir + path.sep) && absPath !== stationDir) {
-    return new Response("Invalid path", { status: 400 });
-  }
-
-  // 6. Stat the file
-  let fileStat: Awaited<ReturnType<typeof fs.stat>>;
-  try {
-    fileStat = await fs.stat(absPath);
-    if (!fileStat.isFile()) {
-      return new Response("Not found", { status: 404 });
+  for (const root of searchRoots) {
+    const candidate = path.resolve(root, relPath);
+    if (!candidate.startsWith(root + path.sep) && candidate !== root) continue;
+    try {
+      const st = await fs.stat(candidate);
+      if (st.isFile()) {
+        absPath = candidate;
+        fileStat = st;
+        containingRoot = root;
+        break;
+      }
+    } catch {
+      // try next root
     }
-  } catch {
+  }
+
+  if (!absPath || !fileStat || !containingRoot) {
     return new Response("Not found", { status: 404 });
   }
 

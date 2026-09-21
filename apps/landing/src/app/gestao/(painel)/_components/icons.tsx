@@ -292,3 +292,21 @@ export function IconFile(p: IconProps) {
     </Svg>
   );
 }
+
+export function IconPause(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </Svg>
+  );
+}
+
+export function IconUser(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M5.5 21a6.5 6.5 0 0 1 13 0" />
+    </Svg>
+  );
+}

@@ -16,7 +16,9 @@ import {
   IconLogout,
   IconSearch,
   IconPlay,
+  IconPause,
   IconFolder,
+  IconClose,
 } from "./icons";
 import type { LiveData } from "../../_lib/live";
 import { buildSchedule, fmtDur, parseHHMM } from "../../_lib/live-schedule";
@@ -39,8 +41,9 @@ const NAV: NavItem[] = [
   { href: "/gestao/settings", label: "Settings", Icon: IconSettings },
 ];
 
+const STREAM_URL = "https://radio.itfm.live/listen/it.fm/radio.mp3";
+
 function isActive(pathname: string, href: string) {
-  // O índice /gestao é prefixo de tudo → só ativo em igualdade exata.
   return href === "/gestao"
     ? pathname === href
     : pathname === href || pathname.startsWith(href + "/");
@@ -51,6 +54,16 @@ function initials(name: string) {
   if (!parts.length) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Module-level audio so it persists across re-renders / navigations
+let _audio: HTMLAudioElement | null = null;
+function getAudio(): HTMLAudioElement {
+  if (!_audio) {
+    _audio = new Audio(STREAM_URL);
+    _audio.preload = "none";
+  }
+  return _audio;
 }
 
 function LiveListeners({ count }: { count: number }) {
@@ -69,28 +82,22 @@ function LiveListeners({ count }: { count: number }) {
   );
 }
 
-// Barra "Em direto" — trapézio de destaque colado à navbar, presente em TODAS
-// as páginas do painel. Vive no shell (não na página Live) para andar SEMPRE
-// junto do cabeçalho: como faz parte do mesmo bloco `sticky`, acompanha o
-// overscroll da navbar em vez de descolar. O "agora" avança no cliente a partir
-// de um valor determinístico do seam (sem mismatch de hidratação).
-function GlobalNowBar({ live }: { live: LiveData }) {
+// Floating "Em direto" player — below navbar, overlapping content
+function FloatingPlayer({ live }: { live: LiveData }) {
   const [nowSec, setNowSec] = useState(live.decorridoInicial);
+  const [playing, setPlaying] = useState(false);
   const anchorRef = useRef(Date.now());
 
   useEffect(() => {
     const anchor = anchorRef.current;
     const base = live.decorridoInicial;
-
     const sync = () => setNowSec(base + Math.floor((Date.now() - anchor) / 1000));
     const id = setInterval(sync, 1000);
-
     const onVisible = () => {
       if (document.visibilityState === "visible") sync();
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
-
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
@@ -98,23 +105,60 @@ function GlobalNowBar({ live }: { live: LiveData }) {
     };
   }, [live.decorridoInicial]);
 
+  // Sync playing state with module-level audio
+  useEffect(() => {
+    const audio = getAudio();
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => setPlaying(false);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
+    setPlaying(!audio.paused);
+    return () => {
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
+    };
+  }, []);
+
+  function togglePlay() {
+    const audio = getAudio();
+    if (audio.paused) {
+      audio.src = STREAM_URL;
+      audio.load();
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }
+
   const rows = buildSchedule(live.itens, parseHHMM(live.blocoInicio), nowSec);
-  const playing = rows.find((r) => r.estado === "playing") ?? null;
-  const titulo = playing?.item.titulo ?? "Piloto automático";
-  const elapsed = playing ? fmtDur(Math.max(0, playing.item.duracao * (playing.progress / 100))) : "--:--";
-  const total = playing ? fmtDur(playing.item.duracao) : "--:--";
+  const playingRow = rows.find((r) => r.estado === "playing") ?? null;
+  const titulo = playingRow?.item.titulo ?? "Piloto automático";
+  const elapsed = playingRow ? fmtDur(Math.max(0, playingRow.item.duracao * (playingRow.progress / 100))) : "--:--";
+  const total = playingRow ? fmtDur(playingRow.item.duracao) : "--:--";
   const trapezoid = { clipPath: "polygon(0 0, 100% 0, calc(100% - 22px) 100%, 22px 100%)" };
 
   return (
-    <div className="flex justify-center px-4 pb-2">
+    <div className="pointer-events-none fixed left-0 right-0 top-[57px] z-10 flex justify-center px-4 md:left-[76px]">
       <div
         style={trapezoid}
-        className="w-full max-w-2xl bg-brand px-9 pb-2.5 pt-2 text-[#0b3d1a] shadow-lg shadow-brand/20"
+        className="pointer-events-auto w-full max-w-2xl bg-brand px-9 pb-2.5 pt-2 text-[#0b3d1a] shadow-lg shadow-brand/20"
       >
         <div className="flex items-center gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0b3d1a]/15">
-            <IconPlay className="h-4 w-4" />
-          </span>
+          <button
+            type="button"
+            onClick={togglePlay}
+            aria-label={playing ? "Pausar rádio" : "Ouvir rádio em direto"}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0b3d1a]/15 transition-transform hover:scale-110 active:scale-95"
+          >
+            {playing ? (
+              <IconPause className="h-4 w-4" />
+            ) : (
+              <IconPlay className="h-4 w-4" />
+            )}
+          </button>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-widest opacity-70">Em direto</span>
@@ -130,14 +174,67 @@ function GlobalNowBar({ live }: { live: LiveData }) {
             {elapsed} / {total}
           </span>
         </div>
-        {/* progresso do que está a tocar */}
         <div className="mx-1 mt-1.5 h-1 overflow-hidden rounded-full bg-[#0b3d1a]/15">
           <div
             className="h-full rounded-full bg-[#0b3d1a] transition-[width] duration-1000 ease-linear"
-            style={{ width: `${playing?.progress ?? 0}%` }}
+            style={{ width: `${playingRow?.progress ?? 0}%` }}
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+// Expandable inline search
+function InlineSearch({
+  expanded,
+  onToggle,
+  onOpenPalette,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  onOpenPalette: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (expanded && inputRef.current) inputRef.current.focus();
+  }, [expanded]);
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        aria-label="Pesquisar (⌘K)"
+        onClick={onToggle}
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--card)] text-[var(--ink)] transition-colors hover:bg-[var(--bg)]"
+      >
+        <IconSearch className="h-4 w-4" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card)] px-3 py-1.5 transition-all">
+      <IconSearch className="h-4 w-4 shrink-0 text-[var(--gray)]" />
+      <input
+        ref={inputRef}
+        placeholder="Pesquisar…"
+        className="w-28 bg-transparent text-sm text-[var(--ink)] outline-none placeholder:text-[var(--gray)] sm:w-44"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onToggle();
+          if (e.key === "Enter") {
+            onOpenPalette();
+            onToggle();
+          }
+        }}
+        onBlur={() => {
+          setTimeout(onToggle, 150);
+        }}
+      />
+      <span className="hidden shrink-0 rounded-md border border-[var(--line)] bg-[var(--bg)] px-1.5 py-0.5 text-[10px] text-[var(--gray)] sm:block">
+        ⌘K
+      </span>
     </div>
   );
 }
@@ -154,8 +251,9 @@ export default function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [palette, setPalette] = useState(false);
+  const [searchExpanded, setSearchExpanded] = useState(false);
 
-  // ⌘K / Ctrl+K abre a paleta de comandos; Esc fecha.
+  // ⌘K / Ctrl+K opens command palette; Esc closes
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -213,41 +311,34 @@ export default function AppShell({
 
       {/* Coluna principal */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Cabeçalho fixo: top bar + barra "Em direto". Ambos no MESMO bloco
-            sticky → andam sempre juntos e nunca descolam no overscroll. */}
-        <div className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--bg)]/85 backdrop-blur-sm">
-          <header className="flex items-center gap-3 px-4 py-3 sm:px-6">
-            <button
-              type="button"
-              onClick={() => setPalette(true)}
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card)] px-4 py-2 text-sm text-[var(--gray)] transition-colors hover:border-[var(--ink)]/20 sm:max-w-sm"
-            >
-              <IconSearch className="h-4 w-4 shrink-0" />
-              <span className="truncate">Pesquisar ou comandar</span>
-              <span className="ml-auto hidden shrink-0 rounded-md border border-[var(--line)] bg-[var(--bg)] px-1.5 py-0.5 text-[11px] sm:block">
-                ⌘K
-              </span>
-            </button>
-            <span className="flex-1 sm:hidden" />
-            <LiveListeners count={live.now.ouvintes} />
-            <button
-              type="button"
-              aria-label="Notificações"
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--card)] text-[var(--ink)] transition-colors hover:bg-[var(--bg)]"
-            >
-              <IconBell className="h-5 w-5" />
-            </button>
-            <span
-              title={operator.email ?? operator.name}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ink)] text-xs font-medium text-white"
-            >
-              {initials(operator.name)}
-            </span>
-          </header>
-          <GlobalNowBar live={live} />
-        </div>
+        {/* Top bar — single row, icons right-aligned */}
+        <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-[var(--line)] bg-[var(--bg)]/85 px-4 py-3 backdrop-blur-sm sm:px-6">
+          <span className="flex-1" />
+          <LiveListeners count={live.now.ouvintes} />
+          <InlineSearch
+            expanded={searchExpanded}
+            onToggle={() => setSearchExpanded((v) => !v)}
+            onOpenPalette={() => setPalette(true)}
+          />
+          <button
+            type="button"
+            aria-label="Notificações"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--card)] text-[var(--ink)] transition-colors hover:bg-[var(--bg)]"
+          >
+            <IconBell className="h-5 w-5" />
+          </button>
+          <span
+            title={operator.email ?? operator.name}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ink)] text-xs font-medium text-white"
+          >
+            {initials(operator.name)}
+          </span>
+        </header>
 
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 pb-24 sm:px-6 md:pb-8">
+        {/* Floating player — overlaps content, below navbar */}
+        <FloatingPlayer live={live} />
+
+        <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-24 pt-16 sm:px-6 md:pb-8">
           {children}
         </main>
       </div>
@@ -272,7 +363,7 @@ export default function AppShell({
         })}
       </nav>
 
-      {/* Paleta de comandos (⌘K) — navegação rápida; pesquisa real em breve */}
+      {/* Paleta de comandos (⌘K) */}
       {palette ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 px-4 pt-[12vh]"
