@@ -154,7 +154,7 @@ const HISTORY_KEEP = 240;   // faixas por slug a lembrar no .rotation.json (evit
 //  --no-continue --force-overwrites   cada tentativa recomeça limpa (nova extração → novo edge).
 const YTDLP_BASE = ["-4", "--js-runtimes", "node", "-f", "bestaudio/best", "--no-playlist",
   "--no-progress", "--quiet", "--no-warnings", "--socket-timeout", "15", "--retries", "3",
-  "--no-continue", "--force-overwrites"];
+  "--no-continue", "--force-overwrites", "--write-thumbnail", "--convert-thumbnails", "jpg"];
 
 function parseArgs(argv) {
   const flags = {};
@@ -258,11 +258,15 @@ async function main() {
       // re-tenta (nova extração → outro edge) quando um edge está inalcançável.
       await fetchAudio(YTDLP, t.videoId, rawTmpl);
       // o container varia (webm/opus, m4a/aac…) → localiza pelo prefixo do id
-      const raw = (await readdir(DL)).find((f) => f.startsWith(`${t.videoId}.`) && !f.endsWith(".part"));
+      const raw = (await readdir(DL)).find((f) => f.startsWith(`${t.videoId}.`) && !f.endsWith(".part") && !f.endsWith(".jpg"));
       if (!raw) { console.warn(`    ! yt-dlp não produziu áudio p/ ${t.videoId} — salto`); continue; }
       const rawAbs = join(DL, raw);
+      // thumbnail (jpg) sacada pelo --write-thumbnail
+      const thumb = (await readdir(DL)).find((f) => f.startsWith(`${t.videoId}.`) && f.endsWith(".jpg"));
+      const thumbAbs = thumb ? join(DL, thumb) : null;
       const loud = await normalizeMusicToMp3(rawAbs, finalAbs, {
         title: t.title, artist: t.artist, genre: prog.ytGenre, comment: `IT.FM · ${prog.nome}`,
+        coverArt: thumbAbs,
       });
       const d = await probeDur(finalAbs);
       console.log(`    ✓ -16 LUFS (fonte I=${loud?.I?.toFixed(1) ?? "?"}) · ${d.toFixed(0)}s · ${finalRel}`);

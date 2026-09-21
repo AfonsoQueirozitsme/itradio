@@ -76,9 +76,12 @@ export async function normToWav(input, outWav) {
 export async function normalizeMusicToMp3(input, outMp3, meta = {}) {
   const m = await measureLoud(input);
   const af = loudnormFilter(m);
-  const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", input,
-    "-af", `${af},alimiter=limit=0.95`, "-ar", "44100", "-ac", "2",
-    "-map_metadata", "-1"];
+  const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", input];
+  if (meta.coverArt) args.push("-i", meta.coverArt);
+  args.push("-af", `${af},alimiter=limit=0.95`, "-ar", "44100", "-ac", "2",
+    "-map_metadata", "-1");
+  if (meta.coverArt) args.push("-map", "0:a", "-map", "1:v", "-c:v", "copy", "-id3v2_version", "3",
+    "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)");
   if (meta.title)   args.push("-metadata", `title=${meta.title}`);
   if (meta.artist)  args.push("-metadata", `artist=${meta.artist}`);
   if (meta.album)   args.push("-metadata", `album=${meta.album}`);
