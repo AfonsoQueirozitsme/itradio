@@ -27,6 +27,7 @@ export const PROGRAMS = [
   {
     dir: "BootMatinal_DiogoSilva", nome: "Boot Matinal", locutor: "Diogo Silva", slug: "diogo_silva",
     genero: "rock", inicio: 7, fim: 10,
+    vibe: "Manhã energética de commute. Faixas feel-good, pop-rock acessível, indie animado. O ouvinte está a acordar e a ir para o trabalho — quer energia positiva sem ser agressivo.",
     ytGenre: "Feel Good", ytGenreAlts: ["Pop", "Energy Boosters", "Commute"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
     djMode: false,
@@ -34,7 +35,7 @@ export const PROGRAMS = [
   {
     dir: "CtrlAltRitmo_SofiaMartins", nome: "Ctrl+Alt+Ritmo", locutor: "Sofia Martins", slug: "sofia_martins",
     genero: "rock", inicio: 10, fim: 13,
-    // cede 12:00–12:30 ao Tuga Underground → duas janelas
+    vibe: "Meio da manhã, ritmo a subir. Dance & electronic mainstream, house melódico, tech-house acessível. Energia crescente até ao pico do meio-dia. Nada demasiado underground — o ouvinte quer mover-se.",
     windows: [[1000, 1200], [1230, 1300]],
     ytGenre: "Dance & Electronic", ytGenreAlts: ["Electronic", "Dance", "Party"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
@@ -43,7 +44,7 @@ export const PROGRAMS = [
   {
     dir: "TugaUnderground", nome: "Tuga Underground", locutor: "Sofia Martins", slug: "tuga_underground",
     genero: "hiphop", inicio: 12, fim: 13,
-    // programa modular curto — meia-hora entalada na janela do sofia_martins
+    vibe: "Meia-hora dedicada ao rap português underground. Boom bap, líricas cruas, beats pesados. Sem pop português, sem kizomba. Artistas de nicho, mixtapes, freestyles.",
     windows: [[1200, 1230]],
     ytGenre: "Rap Tuga Underground",
     ytGenreAlts: ["Hip Hop Tuga Underground", "Rap Português Underground", "Boom Bap Português", "Hip Hop Tuga"],
@@ -53,6 +54,7 @@ export const PROGRAMS = [
   {
     dir: "Pause&Play_TomasRocha", nome: "Pause & Play", locutor: "Tomás Rocha", slug: "tomas_rocha",
     genero: "house", inicio: 13, fim: 16,
+    vibe: "Tarde relaxada, indie & alternative. Faixas com personalidade: indie rock, dream pop, shoegaze acessível, alt-pop. O ouvinte está a trabalhar com fones — quer descobertas sem choques. Nada pesado nem demasiado pop genérico.",
     ytGenre: "Indie & Alternative", ytGenreAlts: ["Chill", "Indie", "Focus"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
     djMode: false,
@@ -60,6 +62,7 @@ export const PROGRAMS = [
   {
     dir: "HoraDePonta_BeatrizLima", nome: "Hora de Ponta", locutor: "Beatriz Lima", slug: "beatriz_lima",
     genero: "house", inicio: 16, fim: 20,
+    vibe: "Hora de ponta, energia alta. Hip-hop, trap melódico, R&B upbeat, afrobeats. O ouvinte está a sair do trabalho e quer sentir-se bem — beats pesados mas acessíveis. Nada obscuro demais.",
     ytGenre: "Hip-Hop", ytGenreAlts: ["Hip Hop", "Party", "Energy Boosters"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
     djMode: true,
@@ -67,6 +70,7 @@ export const PROGRAMS = [
   {
     dir: "ModoNoturno_GoncaloPires", nome: "Modo Noturno", locutor: "Gonçalo Pires", slug: "goncalo_pires",
     genero: "house", inicio: 20, fim: 23,
+    vibe: "Noite, energia a descer. R&B sensual, soul contemporâneo, neo-soul, chill. O ouvinte está em casa a relaxar — quer ambiente intimista, vozes suaves, produção elegante. Sem bangers.",
     ytGenre: "R&B & Soul", ytGenreAlts: ["Chill", "Sleep", "R&B"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
     djMode: true,

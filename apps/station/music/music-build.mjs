@@ -33,6 +33,82 @@ import { fileURLToPath } from "node:url";
 import { normalizeMusicToMp3, dur as probeDur } from "../lib/audio.mjs";
 import { programBySlug, PROGRAMS } from "../lib/programs.mjs";
 
+// ── AI vibe curator (Claude via Bedrock) ────────────────────────────────────
+let _bedrock = null;
+let _bedrockFailed = false;
+
+async function getBedrockClient() {
+  if (_bedrock) return _bedrock;
+  if (_bedrockFailed) return null;
+  try {
+    const mod = await import("@anthropic-ai/bedrock-sdk");
+    const AnthropicBedrock = mod.default || mod.AnthropicBedrock;
+    const opts = { awsRegion: process.env.AWS_REGION || "eu-west-3" };
+    if (process.env.AWS_SESSION_TOKEN) opts.awsSessionToken = process.env.AWS_SESSION_TOKEN;
+    _bedrock = new AnthropicBedrock(opts);
+    return _bedrock;
+  } catch (e) {
+    console.warn(`    ⚠ Bedrock SDK init failed: ${e.message || e}`);
+    _bedrockFailed = true;
+    return null;
+  }
+}
+
+async function curateWithAI(candidates, prog, target) {
+  const client = await getBedrockClient();
+  if (!client) { console.warn("    ⚠ no Bedrock client"); return null; }
+
+  const model = process.env.MUSIC_AI_MODEL || "eu.anthropic.claude-sonnet-5";
+  const trackList = candidates.map((t, i) =>
+    `${i + 1}. "${t.title}" — ${t.artist} (${t.dur ? Math.round(t.dur) + "s" : "?"})`
+  ).join("\n");
+
+  const prompt = `És o diretor musical da rádio IT.FM. Tens de selecionar as ${target} melhores faixas para o programa "${prog.nome}" (${prog.inicio}h–${prog.fim}h, apresentador: ${prog.locutor}).
+
+VIBE DO PROGRAMA:
+${prog.vibe || prog.ytGenre}
+
+CANDIDATAS (${candidates.length} faixas):
+${trackList}
+
+CRITÉRIOS DE SELEÇÃO:
+- Encaixe na vibe/energia do programa (o mais importante)
+- Qualidade e reconhecimento da faixa (prefere originais a covers/remixes obscuros)
+- Variedade de artistas (evita repetir o mesmo artista)
+- Descarta compilações, mixes, "best of", podcasts, ASMR, ou conteúdo não-musical
+- Descarta faixas que claramente não encaixam no género (ex: metal num programa chill)
+
+Responde APENAS com um JSON array dos NÚMEROS das faixas selecionadas, por ordem de melhor encaixe. Exemplo: [3, 7, 1, 12, ...]
+Seleciona exatamente ${target} faixas.`;
+
+  try {
+    const r = await client.messages.create({
+      model,
+      max_tokens: 16000,
+      thinking: { type: "adaptive" },
+      messages: [{ role: "user", content: prompt }],
+    });
+    const textBlock = r.content.find((b) => b.type === "text");
+    const text = textBlock?.text ?? "";
+    if (!text) {
+      const types = r.content.map((b) => b.type).join(",");
+      console.warn(`    ⚠ AI returned no text block (types: ${types}, blocks: ${r.content.length})`);
+      return null;
+    }
+    const match = text.match(/\[[\d,\s]+\]/);
+    if (!match) { console.warn(`    ⚠ AI response didn't contain JSON array: ${text.slice(0, 120)}`); return null; }
+    const indices = JSON.parse(match[0]);
+    const curated = indices
+      .map((i) => candidates[i - 1])
+      .filter(Boolean)
+      .slice(0, target);
+    return curated.length >= Math.floor(target * 0.5) ? curated : null;
+  } catch (e) {
+    console.warn(`    ⚠ AI curation failed: ${(e.message || e).toString().split("\n")[0]}`);
+    return null;
+  }
+}
+
 const ANALYZE_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "analyze-bpm-key.py");
 
 const exec = promisify(execFile);
@@ -102,9 +178,9 @@ async function main() {
   const fresh = !!flags.fresh;   // substitui o pool: apaga ficheiros+histórico do slug antes de reconstruir
   const target = Number.isFinite(+flags.n) ? +flags.n : prog.poolSize;   // faixas NOVAS a obter (sucessos)
   const limit = Number.isFinite(+flags.limit) ? +flags.limit : Infinity; // teto de TENTATIVAS (p/ --dry-run/prova)
-  // oversample: pede mais candidatas do que o alvo p/ tolerar downloads falhados
-  // (edges mortos, vídeos indisponíveis). Em modo limitado (prova), não oversample.
-  const selectN = Number.isFinite(limit) ? Math.max(limit, target) : target + Math.max(6, Math.ceil(target * 0.6));
+  // oversample 2x: pede o DOBRO de candidatas. A curadoria AI filtra por vibe
+  // antes do download, e o oversample restante tolera downloads falhados.
+  const selectN = Number.isFinite(limit) ? Math.max(limit, target) : target * 2 + Math.max(4, Math.ceil(target * 0.3));
 
   console.log(`▸ ${prog.nome} (${slug}) · género "${prog.ytGenre}" · alvo ${target} (seleciona ${selectN})${fresh ? " · FRESH (substitui pool)" : ""}${dryRun ? " · DRY-RUN" : ""}`);
   console.log(`  python=${PY} · yt-dlp=${YTDLP}`);
@@ -135,6 +211,22 @@ async function main() {
   await rm(excludePath, { force: true });
   if (!tracks.length) die("select_tracks.py não devolveu faixas (histórico esgotou o género? tenta --n maior ou espera trending novo)");
   console.log(`  ${tracks.length} faixas selecionadas`);
+
+  // 1b) AI vibe curation: filtra as candidatas por encaixe no programa.
+  //     Só cura se temos mais candidatas do que o alvo (senão não há o que descartar).
+  const aiTarget = Math.min(target + Math.max(4, Math.ceil(target * 0.3)), tracks.length);
+  if (!flags["no-ai"] && tracks.length > target) {
+    console.log(`  🎵 curadoria AI: a filtrar ${tracks.length} → ${aiTarget} por vibe…`);
+    const curated = await curateWithAI(tracks, prog, aiTarget);
+    if (curated) {
+      console.log(`  ✓ AI selecionou ${curated.length} faixas por encaixe na vibe`);
+      tracks = curated;
+    } else {
+      console.log(`  ⚠ curadoria AI falhou — a usar todas as ${tracks.length} candidatas`);
+    }
+  } else if (tracks.length <= target) {
+    console.log(`  ℹ ${tracks.length} candidatas ≤ alvo ${target} — curadoria AI não aplicada`);
+  }
 
   const outDir = join(MUSIC_BUILD, "musica", slug);
   if (fresh && !dryRun) await rm(outDir, { recursive: true, force: true });  // apaga o pool antigo (double-encode) antes de reconstruir
