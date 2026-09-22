@@ -26,7 +26,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requireKey, BASE } from "../lib/env.mjs";
-import { api, resolveSid, sched, getPlaylists, getFiles, uploadFile, createPlaylist, updatePlaylist, assignToPlaylists, reorderPlaylist, getFileByPath, deleteFiles, restart, findByName } from "../lib/azuracast.mjs";
+import { api, resolveSid, sched, getPlaylists, getFiles, uploadFile, uploadArt, createPlaylist, updatePlaylist, assignToPlaylists, reorderPlaylist, getFileByPath, deleteFiles, restart, findByName } from "../lib/azuracast.mjs";
 import { programBySlug, PROGRAMS, programWindows, programPoolCap } from "../lib/programs.mjs";
 import { djOrder, djOrderLog } from "./dj-order.mjs";
 
@@ -182,7 +182,18 @@ async function main() {
   for (const { prog, rels, existing } of plan) {
     console.log(`\n[${prog.nome}]`);
     console.log(`  upload ${rels.length} faixas…`);
-    for (const rel of rels) await uploadFile(sid, rel, join(MUSIC_BUILD, rel));
+    for (const rel of rels) {
+      await uploadFile(sid, rel, join(MUSIC_BUILD, rel));
+      // Upload album art if thumbnail exists alongside the mp3
+      const thumbPath = join(MUSIC_BUILD, rel.replace(/\.mp3$/i, ".jpg"));
+      if (existsSync(thumbPath)) {
+        const file = await getFileByPath(sid, rel);
+        if (file?.id) {
+          const ok = await uploadArt(sid, file.id, thumbPath);
+          if (ok) console.log(`    🎨 art uploaded: ${rel}`);
+        }
+      }
+    }
 
     let plId = existing?.id;
     const playlistOrder = prog.djMode ? "sequential" : "shuffle";

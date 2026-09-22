@@ -26,7 +26,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, writeFile, mkdir, rm, readdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm, readdir, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -269,7 +269,12 @@ async function main() {
         coverArt: thumbAbs,
       });
       const d = await probeDur(finalAbs);
-      console.log(`    ✓ -16 LUFS (fonte I=${loud?.I?.toFixed(1) ?? "?"}) · ${d.toFixed(0)}s · ${finalRel}`);
+      // Copy thumbnail next to the final mp3 for the deploy to upload as art
+      if (thumbAbs) {
+        const artDest = finalAbs.replace(/\.mp3$/i, ".jpg");
+        await copyFile(thumbAbs, artDest).catch(() => {});
+      }
+      console.log(`    ✓ -16 LUFS (fonte I=${loud?.I?.toFixed(1) ?? "?"}) · ${d.toFixed(0)}s · ${finalRel}${thumbAbs ? " 🎨" : ""}`);
       await rm(rawAbs, { force: true });
       added.push({ videoId: t.videoId, title: t.title, artist: t.artist, dur: d, path: finalRel });
     } catch (e) {

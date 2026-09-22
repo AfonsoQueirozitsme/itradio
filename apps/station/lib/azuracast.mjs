@@ -47,6 +47,27 @@ export async function uploadFile(sid, rel, absPath) {
   await api("POST", `/station/${sid}/files`, { path: rel, file: b64 });
 }
 
+/** Envia album art (jpg/png) para um media file do AzuraCast via a API de art.
+ *  Aceita path absoluto do ficheiro de imagem. Silencioso se falhar. */
+export async function uploadArt(sid, mediaId, imgPath) {
+  try {
+    const imgBuf = await readFile(imgPath);
+    const boundary = "----ITFMArt" + Date.now();
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="art"; filename="cover.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`),
+      imgBuf,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const res = await fetch(`${BASE}/api/station/${sid}/file/${mediaId}/art`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${requireKey()}`, "Content-Type": `multipart/form-data; boundary=${boundary}` },
+      body,
+    });
+    if (!res.ok) return false;
+    return true;
+  } catch { return false; }
+}
+
 /** Cria uma playlist; devolve o objeto criado (com .id). */
 export const createPlaylist = (sid, body) => api("POST", `/station/${sid}/playlists`, body);
 /** Atualiza campos de uma playlist existente. */
