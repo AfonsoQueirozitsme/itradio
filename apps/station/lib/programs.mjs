@@ -69,9 +69,9 @@ export const PROGRAMS = [
   },
   {
     dir: "ModoNoturno_GoncaloPires", nome: "Modo Noturno", locutor: "Gonçalo Pires", slug: "goncalo_pires",
-    genero: "house", inicio: 20, fim: 23,
-    vibe: "Noite, energia a descer. R&B sensual, soul contemporâneo, neo-soul, chill. O ouvinte está em casa a relaxar — quer ambiente intimista, vozes suaves, produção elegante. Sem bangers.",
-    ytGenre: "R&B & Soul", ytGenreAlts: ["Chill", "Sleep", "R&B"],
+    genero: "ecletico", inicio: 20, fim: 23,
+    vibe: "Mix eclético noturno: pop-rap groovy + funk/disco + afrobeats quentes. Anderson .Paak, Tyler The Creator, Childish Gambino, Daft Punk, Jamiroquai, Purple Disco Machine, Chromeo, Burna Boy, Wizkid, Tems, Frank Ocean, Pharrell, Mac Miller, Kaytranada, Jungle. Começa groovy e soulful, sobe ao pico, fecha com vibes quentes e melódicas. Produção elegante, artistas com personalidade — nada genérico. O ouvinte está a curtir a noite, não a dormir.",
+    ytGenre: "Funk", ytGenreAlts: ["Neo Soul", "Afrobeats", "Groovy", "Anderson Paak Tyler Creator"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
     djMode: true,
   },
