@@ -61,9 +61,9 @@ export const PROGRAMS = [
   },
   {
     dir: "HoraDePonta_BeatrizLima", nome: "Hora de Ponta", locutor: "Beatriz Lima", slug: "beatriz_lima",
-    genero: "house", inicio: 16, fim: 20,
-    vibe: "Hora de ponta, energia alta. Hip-hop, trap melódico, R&B upbeat, afrobeats. O ouvinte está a sair do trabalho e quer sentir-se bem — beats pesados mas acessíveis. Nada obscuro demais.",
-    ytGenre: "Hip-Hop", ytGenreAlts: ["Hip Hop", "Party", "Energy Boosters"],
+    genero: "pop", inicio: 16, fim: 20,
+    vibe: "Pop & hits atuais para o drive time. Dua Lipa, The Weeknd, Doja Cat, SZA, Sabrina Carpenter, Olivia Rodrigo, Harry Styles, Bad Bunny, Billie Eilish, Miley Cyrus, Tate McRae, Beyoncé, Bruno Mars, Charlie XCX. Os maiores hits de 2022-2026, pop mainstream com produção forte. Energia positiva, toda a gente conhece — zero obscuridades. Nada antes de 2020 (isto não é throwback).",
+    ytGenre: "Pop Hits", ytGenreAlts: ["Top Hits 2026", "Pop Music", "Today's Hits", "Popular Music"],
     poolSize: 20, poolCap: 60, minDur: 120, maxDur: 360,
     djMode: true,
   },
